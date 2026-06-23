@@ -8,10 +8,11 @@ For each row it searches Google Places by name + location, picks the best
 candidate, fetches its details (website, phone, address), and scores how
 confident the match is — flagging low-confidence rows for manual review.
 
-> **Status:** Functional. The CLI, file I/O, normalization, scoring, and the
-> Google Places API (New) client are implemented and tested. Candidate
-> ranking is still naive (first result) and scoring weights are a baseline;
-> see [Roadmap](#roadmap).
+> **Status:** Functional end-to-end. The CLI, file I/O, normalization,
+> scoring, the Google Places API (New) client, and the full enrichment
+> pipeline (score every candidate → pick best → complete via Place Details →
+> re-score) are implemented and tested. Scoring weights are a baseline; see
+> [Roadmap](#roadmap).
 >
 > The Places integration requires the **Places API (New)** to be enabled on
 > your Google Cloud project. If it is not, every row's `error` column will
@@ -46,19 +47,26 @@ cp .env.example .env
 ## Usage
 
 ```bash
-python -m src.cli --input input/sample_practices.csv --output output/enriched.csv
+python -m src.cli input/sample_practices.csv --output output/enriched.csv
+
+# validate inputs without spending API quota, with per-row logging:
+python -m src.cli input/sample_practices.csv --dry-run --limit 5 --verbose
 ```
 
-Options:
+The input is a positional argument. Options:
 
-| Flag             | Description                                                   |
-| ---------------- | ------------------------------------------------------------- |
-| `-i, --input`    | Path to the input CSV or XLSX (required).                     |
-| `-o, --output`   | Path to write the enriched CSV or XLSX (required).            |
-| `--limit N`      | Only process the first `N` rows (handy for testing).          |
-| `--region CODE`  | Default region for phone parsing (ISO 3166, e.g. `US`).       |
+| Flag             | Description                                                            |
+| ---------------- | --------------------------------------------------------------------- |
+| `input`          | Path to the input CSV or XLSX (positional, required).                 |
+| `-o, --output`   | Output path. Defaults to `output/<input-stem>.enriched<ext>`.         |
+| `--limit N`      | Only process the first `N` rows.                                      |
+| `--dry-run`      | Normalize + build queries but make no API calls and write no output.  |
+| `--no-details`   | Skip the Place Details lookup (faster/cheaper; may miss some sites).  |
+| `-v, --verbose`  | Verbose, per-row logging.                                             |
+| `--region CODE`  | Default region for phone parsing (ISO 3166, e.g. `US`).               |
 
 Input and output format (CSV vs. XLSX) is inferred from the file extension.
+Progress is logged every 25 rows; the API key is never written to logs.
 
 ## Input format
 
@@ -77,17 +85,19 @@ A ready-to-use example lives at [`input/sample_practices.csv`](input/sample_prac
 
 The output preserves the input columns and appends the enrichment results:
 
+Any original input columns are preserved, followed by:
+
 | Column                     | Description                                              |
 | -------------------------- | ------------------------------------------------------- |
-| `practice_name`            | From input.                                             |
-| `phone`                    | From input.                                             |
-| `city`                     | From input.                                             |
-| `state`                    | From input.                                             |
+| *(original columns)*       | Echoed from the input (e.g. `practice_name`, `phone`…). |
+| `normalized_phone`         | Input phone in E.164 (e.g. `+14155550182`), or blank.   |
 | `google_place_id`          | Google Place ID of the matched place.                   |
 | `google_name`              | Place name as returned by Google.                       |
 | `google_formatted_address` | Formatted address from Google.                          |
 | `google_phone`             | Phone number from Google.                               |
 | `google_website`           | Website URL from Google (the primary goal).             |
+| `google_business_status`   | e.g. `OPERATIONAL`, `CLOSED_PERMANENTLY`.               |
+| `match_score`              | Numeric score, `0`–`100`.                               |
 | `match_confidence`         | Confidence label: `high` / `medium` / `low` / `none`.   |
 | `match_reason`             | Human-readable explanation incl. the numeric score.     |
 | `needs_review`             | `True` unless the match is high-confidence and verified.|
@@ -122,24 +132,24 @@ Run the test suite:
 pytest
 ```
 
-The tests cover the normalization helpers (`tests/test_normalize.py`), the
-match scoring (`tests/test_scoring.py`), and the Places client with mocked
-HTTP (`tests/test_google_places.py`). `pyproject.toml` sets `pythonpath` so
+The tests cover normalization (`tests/test_normalize.py`), scoring
+(`tests/test_scoring.py`), the Places client with mocked HTTP
+(`tests/test_google_places.py`), and the enrichment/CLI orchestration with a
+fake client (`tests/test_enrich.py`). `pyproject.toml` sets `pythonpath` so
 `import src` works without installing the package.
 
 ## Roadmap
 
-Implemented: CLI, CSV/XLSX I/O, normalization, the Google Places API (New)
-client (`text_search` / `place_details`) with retry/backoff on 429, 5xx, and
-transient network errors, and rule-based candidate scoring (phone/city/state/
-name/website signals, directory-site detection, business-status penalty)
-producing a `high`/`medium`/`low`/`none` confidence with a `needs_review`
-flag. Still to do:
+Implemented: CLI (CSV/XLSX, `--limit`/`--dry-run`/`--no-details`/`--verbose`),
+normalization, the Google Places API (New) client (`text_search` /
+`place_details`) with retry/backoff on 429, 5xx, and transient network errors,
+rule-based scoring with a `high`/`medium`/`low`/`none` confidence, and the
+end-to-end pipeline that scores every candidate, picks the best, completes it
+via Place Details, and re-scores. Still to do:
 
-- [ ] Candidate selection: rank candidates and score them all, instead of
-      taking (and scoring) only the first text-search result.
 - [ ] Tune the scoring weights/thresholds against labeled data.
 - [ ] Per-request rate limiting and basic caching for API calls.
+- [ ] Use `locationBias`/`locationRestriction` to focus searches by city/state.
 
 ## Configuration
 

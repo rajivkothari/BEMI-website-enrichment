@@ -1,18 +1,23 @@
 """Command-line entry point for the BEMI website enrichment tool.
 
 Usage:
-    python -m src.cli --input input/sample_practices.csv --output output/enriched.csv
+    python -m src.cli input/sample_practices.csv --output output/enriched.csv
+    python -m src.cli input/sample_practices.csv --dry-run --limit 5 --verbose
 """
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
+from . import google_places
 from . import io as table_io
 from .config import Settings
 from .enrich import enrich_table
+
+logger = logging.getLogger("bemi")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -25,49 +30,110 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "-i",
-        "--input",
-        required=True,
+        "input",
         type=Path,
-        help="Path to the input CSV/XLSX (practice_name, phone, city, state).",
+        help="Input CSV/XLSX with columns: practice_name, phone, city, state.",
     )
     parser.add_argument(
         "-o",
         "--output",
-        required=True,
         type=Path,
-        help="Path to write the enriched CSV/XLSX.",
+        default=None,
+        help="Output CSV/XLSX path. Defaults to output/<input-stem>.enriched<ext>.",
     )
     parser.add_argument(
         "--limit",
         type=int,
         default=None,
-        help="Only process the first N rows (useful for testing).",
+        help="Only process the first N rows.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Normalize inputs and build queries but make no API calls and "
+        "write no output (useful for validating input without spending quota).",
+    )
+    parser.add_argument(
+        "--no-details",
+        action="store_true",
+        help="Skip the Place Details lookup (faster/cheaper; may miss some websites).",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Verbose, per-row logging.",
     )
     parser.add_argument(
         "--region",
         default=None,
-        help="Default region for phone parsing (overrides ENRICH_REGION).",
+        help="Default region for phone parsing (ISO 3166, e.g. US). Overrides ENRICH_REGION.",
     )
     return parser
+
+
+def _configure_logging(verbose: bool) -> None:
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        datefmt="%H:%M:%S",
+        stream=sys.stderr,
+    )
+    # Keep third-party HTTP logs quiet even in verbose mode (also avoids any
+    # chance of request internals showing up in our output).
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+
+def _default_output(input_path: Path) -> Path:
+    """Derive a default output path under output/ preserving the extension."""
+    suffix = input_path.suffix.lower() if input_path.suffix else ".csv"
+    return Path("output") / f"{input_path.stem}.enriched{suffix}"
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     """Run the enrichment pipeline. Returns a process exit code."""
     args = build_parser().parse_args(argv)
+    _configure_logging(args.verbose)
 
     settings = Settings.from_env()
     if args.region:
         settings.region = args.region
 
-    df = table_io.load_table(args.input)
+    # Load input.
+    try:
+        df = table_io.load_table(args.input)
+    except (FileNotFoundError, ValueError) as exc:
+        logger.error("Could not read input %s: %s", args.input, exc)
+        return 2
     if args.limit is not None:
         df = df.head(args.limit)
+    logger.info("Loaded %d rows from %s", len(df), args.input)
 
-    enriched = enrich_table(df, settings)
-    out_path = table_io.write_table(enriched, args.output)
+    # Build the Places client up front (unless this is a dry run) so a missing
+    # key fails fast with a clear message instead of erroring every row.
+    client = None
+    if not args.dry_run:
+        try:
+            client = google_places.GooglePlacesClient(settings.api_key)
+        except google_places.PlacesError as exc:
+            logger.error("%s", exc)  # message does not contain the key
+            return 2
 
-    print(f"Wrote {len(enriched)} rows to {out_path}", file=sys.stderr)
+    enriched = enrich_table(
+        df,
+        client=client,
+        region=settings.region,
+        fetch_details=not args.no_details,
+        dry_run=args.dry_run,
+    )
+
+    if args.dry_run:
+        logger.info("Dry run complete; no output written.")
+        return 0
+
+    out_path = args.output or _default_output(args.input)
+    table_io.write_table(enriched, out_path)
+    logger.info("Wrote %d rows to %s", len(enriched), out_path)
     return 0
 
 

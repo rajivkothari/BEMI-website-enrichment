@@ -19,24 +19,26 @@ load_dotenv()
 # Columns expected in the input spreadsheet.
 INPUT_COLUMNS = ["practice_name", "phone", "city", "state"]
 
-# Columns populated from Google Places lookups.
-GOOGLE_COLUMNS = [
+# Columns added by the enrichment step, in output order (appended after the
+# original input columns). When the input carries extra columns they are
+# preserved ahead of these (see ``enrich.output_columns``).
+ENRICHMENT_COLUMNS = [
+    "normalized_phone",
     "google_place_id",
     "google_name",
     "google_formatted_address",
     "google_phone",
     "google_website",
-]
-
-# Columns describing the quality of the match.
-SCORING_COLUMNS = [
+    "google_business_status",
+    "match_score",
     "match_confidence",
     "match_reason",
     "needs_review",
+    "error",
 ]
 
-# Full ordered list of output columns.
-OUTPUT_COLUMNS = INPUT_COLUMNS + GOOGLE_COLUMNS + SCORING_COLUMNS + ["error"]
+# Full ordered output schema for the standard 4-column input.
+OUTPUT_COLUMNS = INPUT_COLUMNS + ENRICHMENT_COLUMNS
 
 # --- Defaults -------------------------------------------------------------
 
