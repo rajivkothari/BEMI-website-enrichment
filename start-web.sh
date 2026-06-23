@@ -8,7 +8,11 @@ PY=".venv/bin/python"
 if [ ! -x "$PY" ]; then
   echo "[setup] Creating virtual environment..."
   python3 -m venv .venv
-  echo "[setup] Installing dependencies (first run only, may take a minute)..."
+fi
+
+# Ensure dependencies are installed (also covers a venv missing packages).
+if ! "$PY" -c "import streamlit" 2>/dev/null; then
+  echo "[setup] Installing dependencies (may take a minute)..."
   "$PY" -m pip install --upgrade pip >/dev/null
   "$PY" -m pip install -r requirements.txt
 fi

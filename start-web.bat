@@ -16,7 +16,12 @@ if not exist "%PY%" (
     pause
     exit /b 1
   )
-  echo [setup] Installing dependencies ^(first run only, may take a minute^)...
+)
+
+REM Ensure dependencies are installed (also covers a venv missing packages).
+"%PY%" -c "import streamlit" 2>nul
+if errorlevel 1 (
+  echo [setup] Installing dependencies ^(may take a minute^)...
   "%PY%" -m pip install --upgrade pip >nul
   "%PY%" -m pip install -r requirements.txt
 )
