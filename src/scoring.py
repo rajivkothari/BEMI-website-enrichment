@@ -18,8 +18,14 @@ from . import normalize
 # official website. A candidate whose only website is one of these is flagged
 # and not treated as an official site.
 DIRECTORY_DOMAINS = (
-    "facebook.com", "yelp.com", "healthgrades.com", "zocdoc.com", "vitals.com",
-    "webmd.com", "yellowpages.com", "mapquest.com", "doximity.com",
+    # Social / maps / general directories
+    "facebook.com", "instagram.com", "linkedin.com", "twitter.com", "x.com",
+    "yelp.com", "yellowpages.com", "mapquest.com",
+    # Medical directories / aggregators
+    "healthgrades.com", "zocdoc.com", "vitals.com", "webmd.com", "doximity.com",
+    "usnews.com", "md.com", "medifind.com", "ratemds.com", "sharecare.com",
+    "caredash.com", "findatopdoc.com", "wellness.com", "everydayhealth.com",
+    "everydayhealth.care", "healthcare6.com", "nhnmanager.com", "obgynfinder.com",
 )
 
 # Point values per signal.

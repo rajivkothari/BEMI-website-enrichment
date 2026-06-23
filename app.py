@@ -15,7 +15,7 @@ import pandas as pd
 import requests
 import streamlit as st
 
-from src import bullseye_export, ui_support
+from src import bullseye_export, ui_support, web_search
 from src import io as table_io
 from src.cache import SQLiteCache
 from src.config import Settings
@@ -124,6 +124,7 @@ def run_enrichment(work: pd.DataFrame, settings: Settings, *, verify: bool,
     cache = SQLiteCache(".cache/enrichment_cache.sqlite") if use_cache else None
     client = GooglePlacesClient(settings.api_key, cache=cache) if settings.api_key else None
     session = requests.Session() if (verify and client) else None
+    searcher = web_search.make_searcher(settings)
     records = work.to_dict("records")
     total = len(records)
     rows, looked_up = [], 0
@@ -133,14 +134,20 @@ def run_enrichment(work: pd.DataFrame, settings: Settings, *, verify: bool,
             for i, record in enumerate(records):
                 has_site = ui_support.has_existing_website(record)
                 if client is not None and not (fill_gaps_only and has_site):
-                    rows.append(enrich_record(
+                    row = enrich_record(
                         record, client, ui_support.OUTPUT_SCHEMA,
                         region=settings.region, fetch_details=True,
-                        verify_websites=verify, verify_session=session))
+                        verify_websites=verify, verify_session=session)
                     looked_up += 1
                 else:
                     # Keep the existing website (or mark "no website") — no API call.
-                    rows.append(ui_support.passthrough_row(record, region=settings.region))
+                    row = ui_support.passthrough_row(record, region=settings.region)
+                # Web-search fallback when Places/source has no official website.
+                if searcher is not None and not str(row.get("official_website_candidate") or "").strip():
+                    row = web_search.fill_missing_website(
+                        row, practice_name=record.get("practice_name"),
+                        city=record.get("city"), state=record.get("state"), searcher=searcher)
+                rows.append(row)
                 bar.progress((i + 1) / total, text=f"Processed {i + 1} of {total}")
         finally:
             if session is not None:
@@ -171,6 +178,10 @@ with st.sidebar:
         st.success("GOOGLE_MAPS_API_KEY detected", icon="✅")
     else:
         st.error("No GOOGLE_MAPS_API_KEY — set it in .env to look up websites.", icon="⚠️")
+    if settings.web_search_enabled:
+        st.caption("🔎 Web-search fallback: on")
+    else:
+        st.caption("🔎 Web-search fallback: off — set SERPER_API_KEY in .env to find sites Places misses")
 
 # --- Step 1: upload -------------------------------------------------------
 st.markdown('<span class="be-label">Step 1 — Upload a prospect list</span>', unsafe_allow_html=True)

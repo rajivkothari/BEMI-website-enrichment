@@ -155,12 +155,25 @@ It reuses the same pipeline (`src/enrich.py`, `src/bullseye_export.py`) and:
   a website (e.g. from Outscraper) are kept and cleaned (tracking junk like
   `%3Futm_source%3D…` is stripped); only the gaps hit Google — so you don't pay
   to re-find sites you already have.
+- A **pre-run cost estimate** (rows · paid Google lookups · est. $) — only rows
+  that actually call the API are counted; tune `$/lookup` to your billing.
 - An editable **review grid** with the website + phone prominent, color-coded
   confidence, and per-row `approved`/`rejected`/`replaced` decisions.
 - One-click **Cleaned XLSX** and **Bullseye JSONL** downloads.
 
 The UI needs `GOOGLE_MAPS_API_KEY` in `.env` only to look up the missing-website
 rows; everything else (mapping, cleaning, review, export) works without it.
+
+### Web-search fallback (optional)
+
+Google **Places** sometimes has no website for a listing even when the practice
+has one (it shows up only in a normal web search). With a web-search provider
+configured, rows that Places can't resolve are searched on the web, and a result
+is accepted **only if it's a standalone, name-matching domain** — directory
+sites (Healthgrades, Zocdoc, US News, …) are skipped, and a group/parent site
+(e.g. a multi-provider practice) is recorded as a review *candidate* rather than
+auto-accepted. Configure one provider in `.env` (`SERPER_API_KEY` for Google
+results, or `BRAVE_API_KEY`); see [`.env.example`](.env.example).
 
 ## Input format
 
