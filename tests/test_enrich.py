@@ -130,6 +130,33 @@ class TestDryRun:
         assert out["google_place_id"] == ""
 
 
+class TestVerifyWebsites:
+    def test_verification_adds_notes_and_bonus(self, monkeypatch):
+        def fake_verify(url, phone, city, state, **kw):
+            return {
+                "final_url": url, "http_status": 200,
+                "website_phone_match": True, "website_city_match": True,
+                "website_state_match": True,
+                "verification_notes": "fetched (200); phone=match, city=match, state=match",
+            }
+
+        monkeypatch.setattr(enrich.website_verify, "verify_website", fake_verify)
+        # Weak Google match so the website bonus is visible in the score.
+        cand = make_candidate(formatted_address="", national_phone="(415) 000-0000",
+                              international_phone="")
+        result = enrich.enrich_table(_df(ROW), client=FakeClient(results=[cand]),
+                                     fetch_details=False, verify_websites=True)
+        out = result.iloc[0]
+        assert "phone=match" in out["verification_notes"]
+        assert "website phone (+20)" in out["match_reason"]
+        assert out["match_score"] == 65
+
+    def test_disabled_by_default_leaves_notes_blank(self):
+        result = enrich.enrich_table(_df(ROW), client=FakeClient(results=[make_candidate()]),
+                                     fetch_details=False)
+        assert result.iloc[0]["verification_notes"] == ""
+
+
 class TestCli:
     def test_dry_run_writes_no_output(self, tmp_path):
         src_csv = tmp_path / "in.csv"

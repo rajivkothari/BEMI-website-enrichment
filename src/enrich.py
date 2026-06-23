@@ -19,8 +19,9 @@ import logging
 from typing import Any, List, Mapping, Optional, Sequence
 
 import pandas as pd
+import requests
 
-from . import google_places, normalize, scoring
+from . import google_places, normalize, scoring, website_verify
 from .config import DEFAULT_REGION, ENRICHMENT_COLUMNS
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,8 @@ def enrich_record(
     *,
     region: str = DEFAULT_REGION,
     fetch_details: bool = True,
+    verify_websites: bool = False,
+    verify_session: Optional[requests.Session] = None,
 ) -> dict:
     """Enrich a single record into an output row (never raises)."""
     row = _base_row(record, columns, region)
@@ -100,6 +103,18 @@ def enrich_record(
             except google_places.PlacesError as exc:
                 logger.debug("details lookup failed for %s: %s",
                              best_candidate.get("place_id"), exc)
+
+        # Optionally verify the homepage (phone/city/state on the site) and
+        # re-score with the extra signals. Never fatal: a bad site just yields
+        # a verification note and no bonus points.
+        if verify_websites and best_candidate.get("website"):
+            verification = website_verify.verify_website(
+                best_candidate["website"],
+                record.get("phone"), record.get("city"), record.get("state"),
+                session=verify_session, region=region,
+            )
+            row["verification_notes"] = verification.get("verification_notes", "")
+            best_result = scoring.score_match(record, best_candidate, verification=verification)
 
         row.update(
             {
@@ -142,6 +157,7 @@ def enrich_table(
     client: Optional["google_places.GooglePlacesClient"] = None,
     region: str = DEFAULT_REGION,
     fetch_details: bool = True,
+    verify_websites: bool = False,
     dry_run: bool = False,
     progress_every: int = 25,
 ) -> pd.DataFrame:
@@ -152,6 +168,8 @@ def enrich_table(
         client: A configured Places client (required unless ``dry_run``).
         region: Default region for phone normalization.
         fetch_details: Whether to call Place Details for the best candidate.
+        verify_websites: Whether to fetch each matched homepage and verify the
+            phone/city/state on it (slower; off by default).
         dry_run: If true, normalize + build queries but make no API calls.
         progress_every: Log an INFO progress line every N rows (0 disables).
 
@@ -173,20 +191,31 @@ def enrich_table(
     if client is None:
         raise google_places.PlacesError("A Places client is required to enrich (or use dry_run=True).")
 
-    logger.info("Enriching %d rows (fetch_details=%s)", total, fetch_details)
-    for index, record in enumerate(records, start=1):
-        row = enrich_record(record, client, columns, region=region, fetch_details=fetch_details)
-        rows.append(row)
-        if row.get("error"):
-            logger.debug("row %d error: %s", index, row["error"])
-        else:
-            logger.debug(
-                "row %d: %r -> %r (score=%s, %s)",
-                index, record.get("practice_name"), row.get("google_name"),
-                row.get("match_score"), row.get("match_confidence"),
+    # One shared session for homepage fetches (connection reuse).
+    verify_session = requests.Session() if verify_websites else None
+    logger.info("Enriching %d rows (fetch_details=%s, verify_websites=%s)",
+                total, fetch_details, verify_websites)
+    try:
+        for index, record in enumerate(records, start=1):
+            row = enrich_record(
+                record, client, columns,
+                region=region, fetch_details=fetch_details,
+                verify_websites=verify_websites, verify_session=verify_session,
             )
-        if progress_every and index % progress_every == 0:
-            logger.info("Processed %d/%d rows", index, total)
+            rows.append(row)
+            if row.get("error"):
+                logger.debug("row %d error: %s", index, row["error"])
+            else:
+                logger.debug(
+                    "row %d: %r -> %r (score=%s, %s)",
+                    index, record.get("practice_name"), row.get("google_name"),
+                    row.get("match_score"), row.get("match_confidence"),
+                )
+            if progress_every and index % progress_every == 0:
+                logger.info("Processed %d/%d rows", index, total)
+    finally:
+        if verify_session is not None:
+            verify_session.close()
 
     logger.info("Done: %d rows (%d need review)", total, sum(1 for r in rows if r.get("needs_review")))
     return pd.DataFrame(rows, columns=columns)

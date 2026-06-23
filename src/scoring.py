@@ -6,7 +6,6 @@ none), a ``numeric_score`` (0-100), a human-readable ``match_reason``, and a
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import Any, Mapping
 from urllib.parse import urlparse
@@ -31,6 +30,10 @@ _PTS_NAME_STRONG = 20    # fuzzy name >= 90
 _PTS_NAME_PARTIAL = 10   # fuzzy name 75-89
 _PTS_WEBSITE = 10        # official (non-directory) website present
 _PTS_NOT_OPERATIONAL = -30
+# Website-verification signals (from fetching the homepage).
+_PTS_WEB_PHONE = 20
+_PTS_WEB_CITY = 10
+_PTS_WEB_STATE = 5
 
 # Fuzzy-name thresholds (token-sort ratio, 0-100).
 _NAME_STRONG = 90
@@ -86,23 +89,11 @@ def _name_score(practice_name: Any, candidate_name: Any) -> int:
 
 
 def _city_in_address(formatted_address: Any, city: Any) -> bool:
-    city_norm = normalize.normalize_text(city)
-    if not city_norm:
-        return False
-    return city_norm in normalize.normalize_text(formatted_address)
+    return normalize.city_in_text(formatted_address, city)
 
 
 def _state_in_address(formatted_address: Any, state: Any) -> bool:
-    if not state or not formatted_address:
-        return False
-    address = str(formatted_address)
-    # Prefer a case-sensitive match on the uppercase USPS code (e.g. "CA"),
-    # which avoids false positives from lowercase words like "or"/"in".
-    abbrev = normalize.normalize_state(state)
-    if abbrev and re.search(rf"\b{re.escape(abbrev)}\b", address):
-        return True
-    state_norm = normalize.normalize_text(state)
-    return bool(state_norm) and state_norm in normalize.normalize_text(address)
+    return normalize.state_in_text(formatted_address, state)
 
 
 def _confidence_level(
@@ -130,6 +121,7 @@ def _confidence_level(
 def score_match(
     row: Mapping[str, Any],
     candidate: Mapping[str, Any],
+    verification: Optional[Mapping[str, Any]] = None,
 ) -> MatchResult:
     """Score a Google Places ``candidate`` against an input ``row``.
 
@@ -138,6 +130,9 @@ def score_match(
         candidate: A normalized Places dict (``name``, ``formatted_address``,
             ``national_phone``, ``international_phone``, ``website``,
             ``business_status``, ...).
+        verification: Optional website-verification result (see
+            :func:`src.website_verify.verify_website`); when its
+            ``website_*_match`` flags are set, they add to the score.
 
     Returns:
         A :class:`MatchResult`.
@@ -202,6 +197,18 @@ def score_match(
     if status and status.upper() != "OPERATIONAL":
         score += _PTS_NOT_OPERATIONAL
         reasons.append(f"not operational: {status} ({_PTS_NOT_OPERATIONAL})")
+
+    # --- Website verification (optional homepage fetch) ------------------
+    if verification:
+        if verification.get("website_phone_match"):
+            score += _PTS_WEB_PHONE
+            reasons.append(f"website phone (+{_PTS_WEB_PHONE})")
+        if verification.get("website_city_match"):
+            score += _PTS_WEB_CITY
+            reasons.append(f"website city (+{_PTS_WEB_CITY})")
+        if verification.get("website_state_match"):
+            score += _PTS_WEB_STATE
+            reasons.append(f"website state (+{_PTS_WEB_STATE})")
 
     score = max(0, min(100, score))
 

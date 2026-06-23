@@ -60,6 +60,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the Place Details lookup (faster/cheaper; may miss some websites).",
     )
     parser.add_argument(
+        "--verify-websites",
+        action="store_true",
+        help="Fetch each matched homepage and verify the phone/city/state on "
+        "it for extra confidence (off by default; adds time).",
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -149,6 +155,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             client=client,
             region=settings.region,
             fetch_details=not args.no_details,
+            verify_websites=args.verify_websites,
             dry_run=args.dry_run,
         )
 

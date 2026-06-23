@@ -62,6 +62,7 @@ The input is a positional argument. Options:
 | `--limit N`      | Only process the first `N` rows.                                      |
 | `--dry-run`      | Normalize + build queries but make no API calls and write no output.  |
 | `--no-details`   | Skip the Place Details lookup (faster/cheaper; may miss some sites).  |
+| `--verify-websites` | Fetch each matched homepage and verify the phone/city/state on it (off by default; adds time). |
 | `-v, --verbose`  | Verbose, per-row logging.                                             |
 | `--region CODE`  | Default region for phone parsing (ISO 3166, e.g. `US`).               |
 | `--cache-db PATH`| SQLite cache file (default `.cache/enrichment_cache.sqlite`).         |
@@ -80,6 +81,15 @@ are keyed by the normalized query and place details by Place ID; entries
 older than the TTL (`--cache-ttl-days`, default 30) are refreshed
 automatically. Use `--no-cache` to bypass it. The cache stores only public
 Places data — never the API key.
+
+### Website verification (optional)
+
+With `--verify-websites`, each matched homepage is fetched (redirects
+followed, homepage only — no crawling) and checked for the input phone, city,
+and state. Matches add to the score (phone `+20`, city `+10`, state `+5`) and
+are summarized in `verification_notes`. It's off by default because it adds a
+network request per row. A site that can't be fetched never fails the row —
+the reason is recorded in `verification_notes` and no bonus is applied.
 
 ## Input format
 
@@ -114,6 +124,7 @@ Any original input columns are preserved, followed by:
 | `match_confidence`         | Confidence label: `high` / `medium` / `low` / `none`.   |
 | `match_reason`             | Human-readable explanation incl. the numeric score.     |
 | `needs_review`             | `True` unless the match is high-confidence and verified.|
+| `verification_notes`       | Homepage-verification summary (with `--verify-websites`).|
 | `error`                    | Error message if the row could not be processed.        |
 
 ## Project structure
@@ -134,6 +145,7 @@ BEMI-website-enrichment/
     ├── normalize.py          # phone / city / state normalization
     ├── google_places.py      # GooglePlacesClient (Places API New)
     ├── cache.py              # SQLite response cache
+    ├── website_verify.py     # optional homepage verification
     ├── scoring.py            # match confidence scoring
     └── enrich.py             # orchestration (row -> enriched row)
 ```
@@ -148,19 +160,20 @@ pytest
 
 The tests cover normalization (`tests/test_normalize.py`), scoring
 (`tests/test_scoring.py`), the Places client with mocked HTTP
-(`tests/test_google_places.py`), the SQLite cache (`tests/test_cache.py`),
-and the enrichment/CLI orchestration with a fake client
-(`tests/test_enrich.py`). `pyproject.toml` sets `pythonpath` so `import src`
-works without installing the package.
+(`tests/test_google_places.py`), the SQLite cache (`tests/test_cache.py`), website verification
+(`tests/test_website_verify.py`), and the enrichment/CLI orchestration with a
+fake client (`tests/test_enrich.py`). `pyproject.toml` sets `pythonpath` so
+`import src` works without installing the package.
 
 ## Roadmap
 
-Implemented: CLI (CSV/XLSX, `--limit`/`--dry-run`/`--no-details`/`--verbose`,
-SQLite response cache), normalization, the Google Places API (New) client
-(`text_search` / `place_details`) with retry/backoff on 429, 5xx, and
-transient network errors, rule-based scoring with a `high`/`medium`/`low`/
-`none` confidence, and the end-to-end pipeline that scores every candidate,
-picks the best, completes it via Place Details, and re-scores. Still to do:
+Implemented: CLI (CSV/XLSX, `--limit`/`--dry-run`/`--no-details`/
+`--verify-websites`/`--verbose`, SQLite response cache), normalization, the
+Google Places API (New) client (`text_search` / `place_details`) with
+retry/backoff on 429, 5xx, and transient network errors, rule-based scoring
+with a `high`/`medium`/`low`/`none` confidence, optional homepage
+verification, and the end-to-end pipeline that scores every candidate, picks
+the best, completes it via Place Details, and re-scores. Still to do:
 
 - [ ] Tune the scoring weights/thresholds against labeled data.
 - [ ] Per-request rate limiting / throttling for API calls.

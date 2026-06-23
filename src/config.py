@@ -34,6 +34,7 @@ ENRICHMENT_COLUMNS = [
     "match_confidence",
     "match_reason",
     "needs_review",
+    "verification_notes",
     "error",
 ]
 

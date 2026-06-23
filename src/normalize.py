@@ -34,6 +34,8 @@ _US_STATES = {
     "district of columbia": "DC", "puerto rico": "PR",
 }
 _VALID_ABBREVIATIONS = set(_US_STATES.values())
+# USPS abbreviation -> full (lowercased) state name, for text matching.
+_ABBREV_TO_STATE = {abbrev: name for name, abbrev in _US_STATES.items()}
 
 # Smart punctuation -> ASCII, applied before stripping "weird" characters so
 # names like "O'Brien" survive curly-apostrophe input.
@@ -183,3 +185,31 @@ def build_search_query(
     name = " ".join(str(practice_name).split()) if practice_name else ""
     parts = [name, normalize_city(city), normalize_state(state)]
     return " ".join(part for part in parts if part)
+
+
+def city_in_text(text: Any, city: Any) -> bool:
+    """True if ``city`` appears in ``text`` (case/whitespace-insensitive)."""
+    needle = normalize_text(city)
+    return bool(needle) and needle in normalize_text(text)
+
+
+def state_in_text(text: Any, state: Any) -> bool:
+    """True if ``state`` (name or abbreviation) appears in ``text``.
+
+    Matches the uppercase USPS code as a whole word (case-sensitive, so "CA"
+    does not match "Ca" inside a word), then falls back to the full state name
+    (case-insensitive). The fallback never uses the bare two-letter code, which
+    would otherwise match substrings like "MA" in "Market".
+    """
+    if not state or not text:
+        return False
+    raw = str(text)
+    abbrev = normalize_state(state)
+    if abbrev and re.search(rf"\b{re.escape(abbrev)}\b", raw):
+        return True
+    full_name = _ABBREV_TO_STATE.get(abbrev) if abbrev else None
+    if full_name is None:
+        # Unrecognized input: use it as a name only if it is longer than a code.
+        candidate = normalize_text(state)
+        full_name = candidate if len(candidate) > 2 else None
+    return bool(full_name) and full_name in normalize_text(raw)

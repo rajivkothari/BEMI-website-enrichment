@@ -127,6 +127,31 @@ class TestBusinessStatus:
         assert result.needs_review is True
 
 
+class TestWebsiteVerification:
+    def test_website_signals_add_points(self):
+        # Weak base: name match + official website only (30), no phone/city/state.
+        weak = candidate(formatted_address="", national_phone="(415) 000-0000",
+                         international_phone="")
+        base = score_match(ROW, weak)
+        assert base.numeric_score == 30
+
+        verification = {
+            "website_phone_match": True,
+            "website_city_match": True,
+            "website_state_match": True,
+        }
+        verified = score_match(ROW, weak, verification=verification)
+        assert verified.numeric_score == 65  # 30 + 20 + 10 + 5
+        assert "website phone (+20)" in verified.match_reason
+        assert "website city (+10)" in verified.match_reason
+        assert "website state (+5)" in verified.match_reason
+
+    def test_no_verification_is_unchanged(self):
+        weak = candidate(formatted_address="", national_phone="(415) 000-0000",
+                         international_phone="")
+        assert score_match(ROW, weak, verification=None).numeric_score == 30
+
+
 class TestNoCandidate:
     def test_empty_candidate_is_none(self):
         for empty in ({}, None):

@@ -131,6 +131,31 @@ class TestNormalizeState:
         assert normalize.normalize_state(None) == ""
 
 
+class TestCityStateInText:
+    def test_city_in_text(self):
+        assert normalize.city_in_text("Welcome to San   Francisco!", "san francisco")
+        assert not normalize.city_in_text("Welcome to Oakland", "San Francisco")
+
+    def test_state_matches_uppercase_code(self):
+        assert normalize.state_in_text("123 Main St, San Francisco, CA 94103", "CA")
+
+    def test_state_full_name_fallback_from_code(self):
+        # Input is a code; the page spells the state out.
+        assert normalize.state_in_text("Serving all of California", "CA")
+
+    def test_state_full_name_input(self):
+        assert normalize.state_in_text("Serving all of Massachusetts", "Massachusetts")
+        assert normalize.state_in_text("Serving all of Massachusetts", "MA")
+
+    def test_code_does_not_match_substring(self):
+        # "MA" must not match inside "Market".
+        assert not normalize.state_in_text("123 Market St, San Francisco, CA", "MA")
+
+    def test_blank(self):
+        assert not normalize.state_in_text("anything", "")
+        assert not normalize.city_in_text("", "Reno")
+
+
 class TestBuildSearchQuery:
     def test_builds_name_city_state(self):
         query = normalize.build_search_query(
