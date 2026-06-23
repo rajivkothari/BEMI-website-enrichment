@@ -1,4 +1,4 @@
-.PHONY: install test sample
+.PHONY: install test sample web
 
 # Install runtime + test dependencies.
 install:
@@ -12,3 +12,7 @@ test:
 # Requires GOOGLE_MAPS_API_KEY in your environment or .env.
 sample:
 	python -m src.cli input/sample_practices.csv --output output/sample_enriched.xlsx
+
+# Launch the Streamlit web UI.
+web:
+	python -m streamlit run app.py

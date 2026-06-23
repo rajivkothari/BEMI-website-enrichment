@@ -132,11 +132,19 @@ the reason is recorded in `verification_notes` and no bonus is applied.
 
 ## Web UI (Streamlit)
 
-A branded, local web UI is provided for the upload → review → export flow:
+A branded, local web UI is provided for the upload → review → export flow.
+
+**One-command launcher** (creates the venv + installs deps on first run, then
+opens the app in your browser):
+
+- **Windows:** double-click `start-web.bat`, or run `.\start-web` in PowerShell.
+- **macOS / Linux:** `./start-web.sh`
+
+Manual equivalent:
 
 ```bash
-pip install -r requirements.txt   # includes streamlit
-streamlit run app.py              # opens in your browser
+pip install -r requirements.txt   # includes streamlit   (or: make install)
+streamlit run app.py              # opens in your browser (or: make web)
 ```
 
 It reuses the same pipeline (`src/enrich.py`, `src/bullseye_export.py`) and:
@@ -263,8 +271,9 @@ export-only — it does not connect to any Bullseye database or API.
 ```
 BEMI-website-enrichment/
 ├── README.md
-├── Makefile                  # install / test / sample
+├── Makefile                  # install / test / sample / web
 ├── app.py                    # Streamlit web UI
+├── start-web.bat / .sh       # one-command launcher (Windows / Unix)
 ├── .streamlit/config.toml    # Bullseye theme
 ├── requirements.txt
 ├── pyproject.toml            # project metadata + pytest config
