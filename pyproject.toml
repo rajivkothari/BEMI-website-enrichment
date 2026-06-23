@@ -1,0 +1,10 @@
+[project]
+name = "bemi-website-enrichment"
+version = "0.1.0"
+description = "Enrich spreadsheets of businesses/practices with official websites via the Google Maps Places API."
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+# Make the `src` package importable from tests without installing the project.
+pythonpath = ["."]
+testpaths = ["tests"]
