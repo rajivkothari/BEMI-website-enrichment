@@ -1,0 +1,7 @@
+# Bullseye brand theme (see bullseyemedical.ai).
+[theme]
+primaryColor = "#c84b2f"          # terracotta accent / bullseye center
+backgroundColor = "#f7f6f4"       # warm paper
+secondaryBackgroundColor = "#ffffff"
+textColor = "#0a0a0a"             # ink
+font = "sans serif"               # DM Sans applied via CSS in app.py

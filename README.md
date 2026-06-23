@@ -130,6 +130,30 @@ are summarized in `verification_notes`. It's off by default because it adds a
 network request per row. A site that can't be fetched never fails the row —
 the reason is recorded in `verification_notes` and no bonus is applied.
 
+## Web UI (Streamlit)
+
+A branded, local web UI is provided for the upload → review → export flow:
+
+```bash
+pip install -r requirements.txt   # includes streamlit
+streamlit run app.py              # opens in your browser
+```
+
+It reuses the same pipeline (`src/enrich.py`, `src/bullseye_export.py`) and:
+
+- **Ingests CSV/XLSX, including Outscraper exports** — columns are auto-detected
+  (`name`→practice_name, `website`, `place_id`, …) and remappable.
+- **"Only look up rows missing a website"** (default on): rows that already have
+  a website (e.g. from Outscraper) are kept and cleaned (tracking junk like
+  `%3Futm_source%3D…` is stripped); only the gaps hit Google — so you don't pay
+  to re-find sites you already have.
+- An editable **review grid** with the website + phone prominent, color-coded
+  confidence, and per-row `approved`/`rejected`/`replaced` decisions.
+- One-click **Cleaned XLSX** and **Bullseye JSONL** downloads.
+
+The UI needs `GOOGLE_MAPS_API_KEY` in `.env` only to look up the missing-website
+rows; everything else (mapping, cleaning, review, export) works without it.
+
 ## Input format
 
 The input spreadsheet must contain these columns:
@@ -240,6 +264,8 @@ export-only — it does not connect to any Bullseye database or API.
 BEMI-website-enrichment/
 ├── README.md
 ├── Makefile                  # install / test / sample
+├── app.py                    # Streamlit web UI
+├── .streamlit/config.toml    # Bullseye theme
 ├── requirements.txt
 ├── pyproject.toml            # project metadata + pytest config
 ├── .env.example              # template for your local .env
@@ -247,6 +273,7 @@ BEMI-website-enrichment/
 │   └── sample_practices.csv  # example input (5 sample rows)
 ├── output/                   # generated outputs (gitignored)
 └── src/
+    ├── ui_support.py         # pure UI helpers (Outscraper mapping, etc.)
     ├── cli.py                # argument parsing + entry point
     ├── config.py             # env loading, column schema, constants
     ├── io.py                 # load/write CSV & XLSX
