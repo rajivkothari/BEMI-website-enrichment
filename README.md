@@ -64,9 +64,22 @@ The input is a positional argument. Options:
 | `--no-details`   | Skip the Place Details lookup (faster/cheaper; may miss some sites).  |
 | `-v, --verbose`  | Verbose, per-row logging.                                             |
 | `--region CODE`  | Default region for phone parsing (ISO 3166, e.g. `US`).               |
+| `--cache-db PATH`| SQLite cache file (default `.cache/enrichment_cache.sqlite`).         |
+| `--no-cache`     | Disable the response cache (always call the API).                     |
+| `--cache-ttl-days N` | Refresh cached entries older than N days (default 30).           |
 
 Input and output format (CSV vs. XLSX) is inferred from the file extension.
 Progress is logged every 25 rows; the API key is never written to logs.
+
+### Caching
+
+Google Places responses are cached in a local SQLite database
+(`--cache-db`, default `.cache/enrichment_cache.sqlite`) so re-running over
+the same input doesn't re-call (or re-pay for) the API. Text-search results
+are keyed by the normalized query and place details by Place ID; entries
+older than the TTL (`--cache-ttl-days`, default 30) are refreshed
+automatically. Use `--no-cache` to bypass it. The cache stores only public
+Places data — never the API key.
 
 ## Input format
 
@@ -120,6 +133,7 @@ BEMI-website-enrichment/
     ├── io.py                 # load/write CSV & XLSX
     ├── normalize.py          # phone / city / state normalization
     ├── google_places.py      # GooglePlacesClient (Places API New)
+    ├── cache.py              # SQLite response cache
     ├── scoring.py            # match confidence scoring
     └── enrich.py             # orchestration (row -> enriched row)
 ```
@@ -134,21 +148,22 @@ pytest
 
 The tests cover normalization (`tests/test_normalize.py`), scoring
 (`tests/test_scoring.py`), the Places client with mocked HTTP
-(`tests/test_google_places.py`), and the enrichment/CLI orchestration with a
-fake client (`tests/test_enrich.py`). `pyproject.toml` sets `pythonpath` so
-`import src` works without installing the package.
+(`tests/test_google_places.py`), the SQLite cache (`tests/test_cache.py`),
+and the enrichment/CLI orchestration with a fake client
+(`tests/test_enrich.py`). `pyproject.toml` sets `pythonpath` so `import src`
+works without installing the package.
 
 ## Roadmap
 
-Implemented: CLI (CSV/XLSX, `--limit`/`--dry-run`/`--no-details`/`--verbose`),
-normalization, the Google Places API (New) client (`text_search` /
-`place_details`) with retry/backoff on 429, 5xx, and transient network errors,
-rule-based scoring with a `high`/`medium`/`low`/`none` confidence, and the
-end-to-end pipeline that scores every candidate, picks the best, completes it
-via Place Details, and re-scores. Still to do:
+Implemented: CLI (CSV/XLSX, `--limit`/`--dry-run`/`--no-details`/`--verbose`,
+SQLite response cache), normalization, the Google Places API (New) client
+(`text_search` / `place_details`) with retry/backoff on 429, 5xx, and
+transient network errors, rule-based scoring with a `high`/`medium`/`low`/
+`none` confidence, and the end-to-end pipeline that scores every candidate,
+picks the best, completes it via Place Details, and re-scores. Still to do:
 
 - [ ] Tune the scoring weights/thresholds against labeled data.
-- [ ] Per-request rate limiting and basic caching for API calls.
+- [ ] Per-request rate limiting / throttling for API calls.
 - [ ] Use `locationBias`/`locationRestriction` to focus searches by city/state.
 
 ## Configuration

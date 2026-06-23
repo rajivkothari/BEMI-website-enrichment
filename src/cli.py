@@ -14,6 +14,7 @@ from typing import Optional, Sequence
 
 from . import google_places
 from . import io as table_io
+from .cache import DEFAULT_TTL_DAYS, SQLiteCache
 from .config import Settings
 from .enrich import enrich_table
 
@@ -69,6 +70,23 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Default region for phone parsing (ISO 3166, e.g. US). Overrides ENRICH_REGION.",
     )
+    parser.add_argument(
+        "--cache-db",
+        type=Path,
+        default=Path(".cache/enrichment_cache.sqlite"),
+        help="SQLite cache file for Places responses.",
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Disable the response cache (always call the API).",
+    )
+    parser.add_argument(
+        "--cache-ttl-days",
+        type=float,
+        default=DEFAULT_TTL_DAYS,
+        help="Treat cached entries older than this many days as misses.",
+    )
     return parser
 
 
@@ -109,32 +127,42 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         df = df.head(args.limit)
     logger.info("Loaded %d rows from %s", len(df), args.input)
 
-    # Build the Places client up front (unless this is a dry run) so a missing
-    # key fails fast with a clear message instead of erroring every row.
+    # Build the cache and Places client up front (unless this is a dry run) so
+    # a missing key fails fast with a clear message instead of erroring rows.
+    cache = None
     client = None
     if not args.dry_run:
+        if not args.no_cache:
+            cache = SQLiteCache(args.cache_db, ttl_days=args.cache_ttl_days)
+            logger.info("Cache: %s (ttl %s days)", args.cache_db, args.cache_ttl_days)
         try:
-            client = google_places.GooglePlacesClient(settings.api_key)
+            client = google_places.GooglePlacesClient(settings.api_key, cache=cache)
         except google_places.PlacesError as exc:
             logger.error("%s", exc)  # message does not contain the key
+            if cache is not None:
+                cache.close()
             return 2
 
-    enriched = enrich_table(
-        df,
-        client=client,
-        region=settings.region,
-        fetch_details=not args.no_details,
-        dry_run=args.dry_run,
-    )
+    try:
+        enriched = enrich_table(
+            df,
+            client=client,
+            region=settings.region,
+            fetch_details=not args.no_details,
+            dry_run=args.dry_run,
+        )
 
-    if args.dry_run:
-        logger.info("Dry run complete; no output written.")
+        if args.dry_run:
+            logger.info("Dry run complete; no output written.")
+            return 0
+
+        out_path = args.output or _default_output(args.input)
+        table_io.write_table(enriched, out_path)
+        logger.info("Wrote %d rows to %s", len(enriched), out_path)
         return 0
-
-    out_path = args.output or _default_output(args.input)
-    table_io.write_table(enriched, out_path)
-    logger.info("Wrote %d rows to %s", len(enriched), out_path)
-    return 0
+    finally:
+        if cache is not None:
+            cache.close()
 
 
 if __name__ == "__main__":

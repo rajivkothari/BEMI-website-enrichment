@@ -147,7 +147,8 @@ class TestCli:
         pd.DataFrame([ROW]).to_csv(src_csv, index=False)
         out = tmp_path / "out.csv"
 
-        rc = cli.main([str(src_csv), "--output", str(out)])
+        rc = cli.main([str(src_csv), "--output", str(out),
+                       "--cache-db", str(tmp_path / "cache.sqlite")])
         assert rc == 0
         assert out.exists()
 
@@ -162,5 +163,6 @@ class TestCli:
         monkeypatch.setattr(google_places, "GooglePlacesClient", boom)
         src_csv = tmp_path / "in.csv"
         pd.DataFrame([ROW]).to_csv(src_csv, index=False)
-        rc = cli.main([str(src_csv), "--output", str(tmp_path / "out.csv")])
+        rc = cli.main([str(src_csv), "--output", str(tmp_path / "out.csv"),
+                       "--cache-db", str(tmp_path / "cache.sqlite")])
         assert rc == 2

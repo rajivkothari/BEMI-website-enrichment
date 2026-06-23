@@ -56,6 +56,9 @@ class GooglePlacesClient:
             429/5xx responses and transient network errors.
         backoff_base: Base seconds for exponential backoff between retries
             (delay = ``backoff_base * 2 ** attempt``).
+        cache: Optional response cache. Any object exposing
+            ``get_text_search``/``set_text_search``/``get_place_details``/
+            ``set_place_details`` (e.g. :class:`src.cache.SQLiteCache`).
 
     Raises:
         PlacesError: If no API key can be resolved.
@@ -69,6 +72,7 @@ class GooglePlacesClient:
         timeout: float = 10.0,
         max_retries: int = 3,
         backoff_base: float = 0.5,
+        cache: Optional[Any] = None,
     ) -> None:
         api_key = api_key or os.getenv("GOOGLE_MAPS_API_KEY")
         if not api_key:
@@ -81,6 +85,7 @@ class GooglePlacesClient:
         self.timeout = timeout
         self.max_retries = max_retries
         self.backoff_base = backoff_base
+        self.cache = cache
 
     # -- Public API --------------------------------------------------------
 
@@ -107,13 +112,20 @@ class GooglePlacesClient:
             for part in (query, city, state)
             if part and str(part).strip()
         )
+        if self.cache is not None:
+            cached = self.cache.get_text_search(text_query)
+            if cached is not None:
+                return cached
         data = self._request(
             "POST",
             PLACES_TEXT_SEARCH_URL,
             field_mask=_TEXT_SEARCH_FIELD_MASK,
             payload={"textQuery": text_query},
         )
-        return [self._normalize_place(place) for place in data.get("places", [])]
+        result = [self._normalize_place(place) for place in data.get("places", [])]
+        if self.cache is not None:
+            self.cache.set_text_search(text_query, result)
+        return result
 
     def place_details(self, place_id: str) -> Dict[str, Any]:
         """Fetch details for a place by its Place ID.
@@ -124,9 +136,16 @@ class GooglePlacesClient:
         Returns:
             A normalized place dict (see :meth:`_normalize_place`).
         """
+        if self.cache is not None:
+            cached = self.cache.get_place_details(place_id)
+            if cached is not None:
+                return cached
         url = PLACES_DETAILS_URL.format(place_id=place_id)
         data = self._request("GET", url, field_mask=_DETAILS_FIELD_MASK)
-        return self._normalize_place(data)
+        result = self._normalize_place(data)
+        if self.cache is not None:
+            self.cache.set_place_details(place_id, result)
+        return result
 
     # -- Internals ---------------------------------------------------------
 
