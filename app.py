@@ -115,32 +115,40 @@ def to_bullseye_jsonl(df: pd.DataFrame) -> str:
 
 
 def run_enrichment(work: pd.DataFrame, settings: Settings, *, verify: bool,
-                   fill_gaps_only: bool, use_cache: bool) -> pd.DataFrame:
+                   fill_gaps_only: bool, use_cache: bool):
+    """Enrich the working frame. Returns (enriched_df, google_lookups).
+
+    Without an API key the run still works: rows that already have a website are
+    kept/cleaned, and the rest are marked "no website" (no Google calls).
+    """
     cache = SQLiteCache(".cache/enrichment_cache.sqlite") if use_cache else None
-    client = GooglePlacesClient(settings.api_key, cache=cache)
-    session = requests.Session() if verify else None
+    client = GooglePlacesClient(settings.api_key, cache=cache) if settings.api_key else None
+    session = requests.Session() if (verify and client) else None
     records = work.to_dict("records")
     total = len(records)
-    rows = []
-    bar = st.progress(0.0, text="Starting…")
-    try:
-        for i, record in enumerate(records):
-            if fill_gaps_only and ui_support.has_existing_website(record):
-                rows.append(ui_support.passthrough_row(record, region=settings.region))
-            else:
-                rows.append(enrich_record(
-                    record, client, ui_support.OUTPUT_SCHEMA,
-                    region=settings.region, fetch_details=True,
-                    verify_websites=verify, verify_session=session,
-                ))
-            bar.progress((i + 1) / total, text=f"Processed {i + 1} of {total}")
-    finally:
-        if session is not None:
-            session.close()
-        if cache is not None:
-            cache.close()
-    bar.empty()
-    return pd.DataFrame(rows, columns=ui_support.OUTPUT_SCHEMA)
+    rows, looked_up = [], 0
+    with st.status(f"Enriching {total} rows…", expanded=True) as status:
+        bar = st.progress(0.0)
+        try:
+            for i, record in enumerate(records):
+                has_site = ui_support.has_existing_website(record)
+                if client is not None and not (fill_gaps_only and has_site):
+                    rows.append(enrich_record(
+                        record, client, ui_support.OUTPUT_SCHEMA,
+                        region=settings.region, fetch_details=True,
+                        verify_websites=verify, verify_session=session))
+                    looked_up += 1
+                else:
+                    # Keep the existing website (or mark "no website") — no API call.
+                    rows.append(ui_support.passthrough_row(record, region=settings.region))
+                bar.progress((i + 1) / total, text=f"Processed {i + 1} of {total}")
+        finally:
+            if session is not None:
+                session.close()
+            if cache is not None:
+                cache.close()
+        status.update(label=f"Done — {total} rows ({looked_up} Google lookups)", state="complete")
+    return pd.DataFrame(rows, columns=ui_support.OUTPUT_SCHEMA), looked_up
 
 
 # --- Sidebar options ------------------------------------------------------
@@ -202,15 +210,24 @@ if site_col:
 
 # --- Step 3: run ----------------------------------------------------------
 st.markdown('<span class="be-label">Step 3 — Enrich</span>', unsafe_allow_html=True)
-run = st.button("🎯  Enrich All", type="primary", disabled=not settings.api_key)
-if run:
+if not settings.api_key:
+    st.warning("No GOOGLE_MAPS_API_KEY set — rows that already have a website are still processed "
+               "and cleaned; rows that need a Google lookup will be marked “no website”.")
+if st.button("🎯  Enrich All", type="primary"):
     work = ui_support.build_working_df(raw, mapping)
     try:
-        st.session_state.enriched = run_enrichment(
-            work, settings, verify=verify, fill_gaps_only=fill_gaps_only, use_cache=use_cache,
-        )
+        enriched, looked_up = run_enrichment(
+            work, settings, verify=verify, fill_gaps_only=fill_gaps_only, use_cache=use_cache)
+        st.session_state.enriched = enriched
+        c = ui_support.tile_counts(enriched)
+        st.success(
+            f"Done — {c['total']} rows · {c['website_found']} with a website · "
+            f"{c['needs_review']} need review · {c['no_website']} with no website · "
+            f"{looked_up} Google lookups.")
     except PlacesError as exc:
-        st.error(f"Could not start: {exc}")
+        st.error(f"Could not run: {exc}")
+    except Exception as exc:  # never fail silently — surface it in the app
+        st.exception(exc)
 
 # --- Step 4: review + export ---------------------------------------------
 if "enriched" in st.session_state:
@@ -226,7 +243,7 @@ if "enriched" in st.session_state:
 
     view = ui_support.build_review_table(disp)
     edited = st.data_editor(
-        view, hide_index=True, use_container_width=True, num_rows="fixed",
+        view, hide_index=True, width="stretch", num_rows="fixed",
         column_config={
             "needs_review": st.column_config.CheckboxColumn("Review?", disabled=True, width="small"),
             "practice": st.column_config.TextColumn("Practice", disabled=True, width="large"),
@@ -236,6 +253,7 @@ if "enriched" in st.session_state:
             "confidence": st.column_config.TextColumn("Confidence", disabled=True, width="small"),
             "score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100, format="%d"),
             "source": st.column_config.TextColumn("Source", disabled=True, width="small"),
+            "reason": st.column_config.TextColumn("Why", disabled=True, width="large"),
             "decision": st.column_config.SelectboxColumn("Decision", options=["", "approved", "rejected", "replaced"]),
             "final_website": st.column_config.TextColumn("Final website (edit)", width="large"),
             "notes": st.column_config.TextColumn("Notes"),
@@ -253,7 +271,7 @@ if "enriched" in st.session_state:
     c1.download_button("⬇  Cleaned XLSX", to_xlsx_bytes(work),
                        file_name="enriched.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                       use_container_width=True)
+                       width="stretch")
     c2.download_button("🎯  Bullseye payload (JSONL)", to_bullseye_jsonl(work),
                        file_name="bullseye_payload.jsonl", mime="application/x-ndjson",
-                       type="primary", use_container_width=True)
+                       type="primary", width="stretch")

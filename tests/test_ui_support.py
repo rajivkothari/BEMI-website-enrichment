@@ -80,6 +80,14 @@ class TestPassthrough:
         assert row["match_confidence"] == "low"
         assert row["needs_review"] is True
 
+    def test_no_website_is_reported(self):
+        row = ui_support.passthrough_row(self._rec(**{ui_support.SRC_WEBSITE: ""}))
+        assert row["official_website_candidate"] == ""
+        assert row["google_website"] == ""
+        assert row["match_confidence"] == "none"
+        assert row["needs_review"] is True
+        assert "No website" in row["match_reason"]
+
     def test_has_existing_website(self):
         assert ui_support.has_existing_website(self._rec())
         assert not ui_support.has_existing_website(self._rec(**{ui_support.SRC_WEBSITE: ""}))
@@ -107,7 +115,8 @@ class TestReviewTableAndTiles:
     def test_review_table_shape(self):
         view = ui_support.build_review_table(self._enriched())
         assert list(view.columns) == ["needs_review", "practice", "location", "phone", "website",
-                                      "confidence", "score", "source", "decision", "final_website", "notes"]
+                                      "confidence", "score", "source", "reason", "decision",
+                                      "final_website", "notes"]
         assert view.iloc[0]["website"] == "https://acme.example"
         assert view.iloc[0]["location"] == "Suwanee, GA"
         assert view.iloc[0]["phone"] == "+14042521137"

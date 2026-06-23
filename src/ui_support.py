@@ -175,6 +175,7 @@ def build_review_table(df: pd.DataFrame) -> pd.DataFrame:
         "confidence": [f"{confidence_dot(v)} {v}".strip() for v in col("match_confidence")],
         "score": pd.to_numeric(col("match_score"), errors="coerce").fillna(0).astype(int),
         "source": col("website_source"),
+        "reason": col("match_reason"),
         "decision": col("review_decision"),
         "final_website": website,
         "notes": col("reviewer_notes"),
