@@ -29,13 +29,19 @@ ENRICHMENT_COLUMNS = [
     "google_formatted_address",
     "google_phone",
     "google_website",
+    "google_maps_uri",
     "google_business_status",
+    "official_website_candidate",
+    "website_source",
     "match_score",
     "match_confidence",
     "match_reason",
     "needs_review",
     "verification_notes",
     "error",
+    # Blank columns for the human reviewer to fill in.
+    "review_decision",
+    "reviewer_notes",
 ]
 
 # Full ordered output schema for the standard 4-column input.

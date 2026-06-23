@@ -130,6 +130,39 @@ class TestDryRun:
         assert out["google_place_id"] == ""
 
 
+class TestReviewColumns:
+    def test_official_website_excludes_directories(self):
+        cand = make_candidate(website="https://www.facebook.com/acme")
+        out = enrich.enrich_table(_df(ROW), client=FakeClient(results=[cand]),
+                                  fetch_details=False).iloc[0]
+        assert out["google_website"] == "https://www.facebook.com/acme"
+        assert out["official_website_candidate"] == ""        # directory excluded
+        assert out["website_source"] == "google_places"
+
+    def test_official_website_for_real_site(self):
+        out = enrich.enrich_table(_df(ROW), client=FakeClient(results=[make_candidate()]),
+                                  fetch_details=False).iloc[0]
+        assert out["official_website_candidate"] == "https://acme.example"
+        assert out["website_source"] == "google_places"
+
+    def test_reviewer_columns_blank(self):
+        out = enrich.enrich_table(_df(ROW), client=FakeClient(results=[make_candidate()]),
+                                  fetch_details=False).iloc[0]
+        assert out["review_decision"] == ""
+        assert out["reviewer_notes"] == ""
+
+    def test_website_source_verified(self, monkeypatch):
+        def fake_verify(url, phone, city, state, **kw):
+            return {"final_url": url, "http_status": 200, "website_phone_match": True,
+                    "website_city_match": True, "website_state_match": True,
+                    "verification_notes": "ok"}
+
+        monkeypatch.setattr(enrich.website_verify, "verify_website", fake_verify)
+        out = enrich.enrich_table(_df(ROW), client=FakeClient(results=[make_candidate()]),
+                                  fetch_details=False, verify_websites=True).iloc[0]
+        assert out["website_source"] == "google_places_verified"
+
+
 class TestVerifyWebsites:
     def test_verification_adds_notes_and_bonus(self, monkeypatch):
         def fake_verify(url, phone, city, state, **kw):

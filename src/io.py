@@ -68,7 +68,10 @@ def write_table(df: pd.DataFrame, path: PathLike) -> Path:
     if suffix in _CSV_SUFFIXES:
         df.to_csv(path, index=False)
     elif suffix in _EXCEL_SUFFIXES:
-        df.to_excel(path, index=False)
+        # Imported lazily so CSV-only use doesn't require the styling code.
+        from .excel_format import write_formatted_xlsx
+
+        write_formatted_xlsx(df, path)
     else:
         raise ValueError(
             f"Unsupported output format: {suffix!r} (expected .csv, .xlsx, or .xls)"

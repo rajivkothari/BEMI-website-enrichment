@@ -119,13 +119,40 @@ Any original input columns are preserved, followed by:
 | `google_formatted_address` | Formatted address from Google.                          |
 | `google_phone`             | Phone number from Google.                               |
 | `google_website`           | Website URL from Google (the primary goal).             |
+| `google_maps_uri`          | Google Maps link for the place (clickable in XLSX).     |
 | `google_business_status`   | e.g. `OPERATIONAL`, `CLOSED_PERMANENTLY`.               |
+| `official_website_candidate` | `google_website` unless it's a directory/social site (then blank). |
+| `website_source`           | `google_places` or `google_places_verified` (homepage confirmed). |
 | `match_score`              | Numeric score, `0`–`100`.                               |
 | `match_confidence`         | Confidence label: `high` / `medium` / `low` / `none`.   |
 | `match_reason`             | Human-readable explanation incl. the numeric score.     |
 | `needs_review`             | `True` unless the match is high-confidence and verified.|
 | `verification_notes`       | Homepage-verification summary (with `--verify-websites`).|
 | `error`                    | Error message if the row could not be processed.        |
+| `review_decision`          | **Blank for the reviewer** — `approved`/`rejected`/`replaced`. |
+| `reviewer_notes`           | **Blank for the reviewer** — free-text notes.           |
+
+When the output path ends in `.xlsx`, the sheet is formatted for review: a
+frozen, filtered header; autofit column widths; `needs_review` rows
+highlighted; `match_confidence` color-coded (green/yellow/orange/red for
+high/medium/low/none); and clickable `google_website` / `google_maps_uri` /
+`official_website_candidate` links.
+
+## Recommended review workflow
+
+Export to `.xlsx` (`--output reviewed.xlsx`), ideally with `--verify-websites`,
+then in the spreadsheet:
+
+1. **Filter `needs_review = TRUE`** — these are the rows that need a human.
+2. **Check the `medium` / `low` confidence rows** (color-coded) — read
+   `match_reason` and open the `official_website_candidate` link to confirm.
+3. **Confirm directory/social URLs manually** — rows where
+   `official_website_candidate` is blank but `google_website` is set point at a
+   directory (Yelp, Facebook, …); find the real site if there is one.
+4. **Fill `review_decision`** as `approved` / `rejected` / `replaced` (put the
+   corrected URL in `reviewer_notes` when `replaced`).
+
+High-confidence rows (green, `needs_review = FALSE`) generally need no action.
 
 ## Project structure
 
@@ -146,6 +173,7 @@ BEMI-website-enrichment/
     ├── google_places.py      # GooglePlacesClient (Places API New)
     ├── cache.py              # SQLite response cache
     ├── website_verify.py     # optional homepage verification
+    ├── excel_format.py       # XLSX styling for human review
     ├── scoring.py            # match confidence scoring
     └── enrich.py             # orchestration (row -> enriched row)
 ```
@@ -161,7 +189,8 @@ pytest
 The tests cover normalization (`tests/test_normalize.py`), scoring
 (`tests/test_scoring.py`), the Places client with mocked HTTP
 (`tests/test_google_places.py`), the SQLite cache (`tests/test_cache.py`), website verification
-(`tests/test_website_verify.py`), and the enrichment/CLI orchestration with a
+(`tests/test_website_verify.py`), XLSX review formatting
+(`tests/test_excel_format.py`), and the enrichment/CLI orchestration with a
 fake client (`tests/test_enrich.py`). `pyproject.toml` sets `pythonpath` so
 `import src` works without installing the package.
 
@@ -172,8 +201,9 @@ Implemented: CLI (CSV/XLSX, `--limit`/`--dry-run`/`--no-details`/
 Google Places API (New) client (`text_search` / `place_details`) with
 retry/backoff on 429, 5xx, and transient network errors, rule-based scoring
 with a `high`/`medium`/`low`/`none` confidence, optional homepage
-verification, and the end-to-end pipeline that scores every candidate, picks
-the best, completes it via Place Details, and re-scores. Still to do:
+verification, review-formatted XLSX output, and the end-to-end pipeline that
+scores every candidate, picks the best, completes it via Place Details, and
+re-scores. Still to do:
 
 - [ ] Tune the scoring weights/thresholds against labeled data.
 - [ ] Per-request rate limiting / throttling for API calls.

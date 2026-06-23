@@ -107,6 +107,7 @@ def enrich_record(
         # Optionally verify the homepage (phone/city/state on the site) and
         # re-score with the extra signals. Never fatal: a bad site just yields
         # a verification note and no bonus points.
+        verification = None
         if verify_websites and best_candidate.get("website"):
             verification = website_verify.verify_website(
                 best_candidate["website"],
@@ -116,14 +117,27 @@ def enrich_record(
             row["verification_notes"] = verification.get("verification_notes", "")
             best_result = scoring.score_match(record, best_candidate, verification=verification)
 
+        website = best_candidate.get("website", "") or ""
+        verified = bool(verification and (
+            verification.get("website_phone_match")
+            or verification.get("website_city_match")
+            or verification.get("website_state_match")
+        ))
         row.update(
             {
                 "google_place_id": best_candidate.get("place_id", ""),
                 "google_name": best_candidate.get("name", ""),
                 "google_formatted_address": best_candidate.get("formatted_address", ""),
                 "google_phone": _best_phone(best_candidate),
-                "google_website": best_candidate.get("website", ""),
+                "google_website": website,
+                "google_maps_uri": best_candidate.get("google_maps_uri", ""),
                 "google_business_status": best_candidate.get("business_status", ""),
+                "official_website_candidate": (
+                    website if website and not scoring.is_directory_website(website) else ""
+                ),
+                "website_source": (
+                    ("google_places_verified" if verified else "google_places") if website else ""
+                ),
                 "match_score": best_result.numeric_score,
                 "match_confidence": best_result.confidence,
                 "match_reason": best_result.match_reason,
