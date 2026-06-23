@@ -93,6 +93,26 @@ class TestPassthrough:
         assert not ui_support.has_existing_website(self._rec(**{ui_support.SRC_WEBSITE: ""}))
 
 
+class TestCostEstimate:
+    def _work(self):
+        raw = pd.DataFrame([
+            {"name": "Has Site", "phone": "", "city": "", "state": "", "website": "https://a.example"},
+            {"name": "No Site", "phone": "", "city": "", "state": "", "website": ""},
+        ])
+        return ui_support.build_working_df(raw, ui_support.detect_column_mapping(raw.columns))
+
+    def test_count_lookups(self):
+        work = self._work()
+        assert ui_support.count_lookups(work, fill_gaps_only=True, has_key=True) == 1   # only the gap
+        assert ui_support.count_lookups(work, fill_gaps_only=False, has_key=True) == 2  # all rows
+        assert ui_support.count_lookups(work, fill_gaps_only=True, has_key=False) == 0  # no key
+
+    def test_estimate_cost(self):
+        assert ui_support.estimate_cost(10, 0.05) == 0.5
+        assert ui_support.estimate_cost(0) == 0.0
+        assert ui_support.estimate_cost(3, 0.049) == 0.15
+
+
 class TestReviewTableAndTiles:
     def _enriched(self):
         base = {c: "" for c in INPUT_COLUMNS + ENRICHMENT_COLUMNS}

@@ -162,6 +162,10 @@ with st.sidebar:
     use_cache = st.toggle("Use cache", value=True, help="Reuse prior Google responses (free re-runs).")
     region = st.text_input("Phone region", value=settings.region or "US")
     settings.region = region or "US"
+    price_per_lookup = st.number_input(
+        "Est. $/lookup", value=ui_support.PRICE_PER_LOOKUP, min_value=0.0, step=0.005, format="%.3f",
+        help="Google Places cost per looked-up row (1 Text Search + 1 Place Details). "
+             "Tune to your billing; excludes Google's free monthly credit.")
     st.divider()
     if settings.api_key:
         st.success("GOOGLE_MAPS_API_KEY detected", icon="✅")
@@ -208,13 +212,28 @@ if site_col:
     st.caption(f"Existing website column **{site_col}**: {have}/{len(raw)} rows already have a value"
                + ("  → those are kept; only the rest hit Google." if fill_gaps_only else ""))
 
+# --- Cost estimate (before running) --------------------------------------
+work = ui_support.build_working_df(raw, mapping)
+n_lookups = ui_support.count_lookups(work, fill_gaps_only=fill_gaps_only, has_key=bool(settings.api_key))
+est = ui_support.estimate_cost(n_lookups, price_per_lookup)
+
+st.markdown('<span class="be-label">Estimated cost</span>', unsafe_allow_html=True)
+m1, m2, m3 = st.columns(3)
+m1.metric("Rows", len(work))
+m2.metric("Google lookups", n_lookups, help="Rows that will call the paid API")
+m3.metric("Est. cost", f"${est:,.2f}")
+if not settings.api_key:
+    st.caption("No API key → 0 paid lookups. Rows missing a website are marked “no website”.")
+else:
+    st.caption(f"{len(work) - n_lookups} rows are free (already have a website); "
+               f"{n_lookups} need a paid lookup. Estimate excludes Google's free monthly credit.")
+
 # --- Step 3: run ----------------------------------------------------------
 st.markdown('<span class="be-label">Step 3 — Enrich</span>', unsafe_allow_html=True)
 if not settings.api_key:
     st.warning("No GOOGLE_MAPS_API_KEY set — rows that already have a website are still processed "
                "and cleaned; rows that need a Google lookup will be marked “no website”.")
 if st.button("🎯  Enrich All", type="primary"):
-    work = ui_support.build_working_df(raw, mapping)
     try:
         enriched, looked_up = run_enrichment(
             work, settings, verify=verify, fill_gaps_only=fill_gaps_only, use_cache=use_cache)
@@ -223,7 +242,7 @@ if st.button("🎯  Enrich All", type="primary"):
         st.success(
             f"Done — {c['total']} rows · {c['website_found']} with a website · "
             f"{c['needs_review']} need review · {c['no_website']} with no website · "
-            f"{looked_up} Google lookups.")
+            f"{looked_up} Google lookups (~${ui_support.estimate_cost(looked_up, price_per_lookup):,.2f}).")
     except PlacesError as exc:
         st.error(f"Could not run: {exc}")
     except Exception as exc:  # never fail silently — surface it in the app

@@ -40,6 +40,11 @@ OUTPUT_SCHEMA = INPUT_COLUMNS + ENRICHMENT_COLUMNS
 
 _CONFIDENCE_DOTS = {"high": "🟢", "medium": "🟡", "low": "🟠", "none": "⚪", "": "⚪"}
 
+# Approximate Google Places (New) cost per looked-up row: one Text Search
+# (~$0.032) + one Place Details (~$0.017), Pro SKUs, before Google's monthly
+# free credit. Tune to your actual billing.
+PRICE_PER_LOOKUP = 0.049
+
 
 def detect_column_mapping(columns) -> Dict[str, Optional[str]]:
     """Best-guess mapping of canonical fields to actual column names."""
@@ -127,6 +132,20 @@ def passthrough_row(record: Mapping[str, Any], region: str = DEFAULT_REGION) -> 
         row.update(match_score=0, match_confidence="none", needs_review=True,
                    match_reason="No website in source data.")
     return row
+
+
+def count_lookups(work: pd.DataFrame, *, fill_gaps_only: bool, has_key: bool) -> int:
+    """How many rows will actually call the (paid) Google API."""
+    if not has_key:
+        return 0
+    if not fill_gaps_only:
+        return len(work)
+    return sum(not has_existing_website(r) for r in work.to_dict("records"))
+
+
+def estimate_cost(n_lookups: int, price_per_lookup: float = PRICE_PER_LOOKUP) -> float:
+    """Estimated USD cost for ``n_lookups`` Google lookups (rounded)."""
+    return round(max(0, n_lookups) * max(0.0, price_per_lookup), 2)
 
 
 def confidence_dot(label: Any) -> str:
