@@ -37,16 +37,20 @@ def enrich_record(record: Mapping[str, object], settings: Settings) -> dict[str,
     """
     row = _blank_output_row(record)
 
-    # Normalize inputs so querying and scoring are consistent. Fall back to
-    # the original value if normalization yields nothing.
+    # Normalize inputs so querying and scoring are consistent. Keep the E.164
+    # phone when available, otherwise fall back to the original value.
     norm = dict(record)
-    norm["phone"] = normalize.normalize_phone(record.get("phone"), settings.region) or record.get("phone", "")
-    norm["city"] = normalize.normalize_city(record.get("city")) or record.get("city", "")
-    norm["state"] = normalize.normalize_state(record.get("state")) or record.get("state", "")
+    phone_info = normalize.normalize_phone(record.get("phone"), settings.region)
+    norm["phone"] = phone_info["e164"] or str(record.get("phone") or "")
+    norm["city"] = normalize.normalize_city(record.get("city"))
+    norm["state"] = normalize.normalize_state(record.get("state"))
 
     try:
-        query = google_places.build_text_query(
-            norm.get("practice_name"), norm.get("city"), norm.get("state")
+        query = normalize.build_search_query(
+            norm.get("practice_name"),
+            norm.get("phone"),
+            norm.get("city"),
+            norm.get("state"),
         )
         candidates = google_places.search_text(
             query, settings.api_key, region=settings.region

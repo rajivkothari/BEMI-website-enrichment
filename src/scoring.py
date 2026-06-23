@@ -48,8 +48,8 @@ def phone_match(
         ``True`` if both normalize to the same E.164 number, ``False`` if
         they differ, or ``None`` if either is missing/unparseable (unknown).
     """
-    a = normalize.normalize_phone(input_phone, region)
-    b = normalize.normalize_phone(google_phone, region)
+    a = normalize.normalize_phone(input_phone, region)["e164"]
+    b = normalize.normalize_phone(google_phone, region)["e164"]
     if a is None or b is None:
         return None
     return a == b

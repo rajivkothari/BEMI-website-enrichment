@@ -1,9 +1,9 @@
 """Google Maps Platform Places API (New) helpers.
 
-STUBS ONLY for this step. The query-building helper is implemented because
-it is pure and useful for tests, but the network calls (:func:`search_text`
-and :func:`get_place_details`) intentionally raise ``NotImplementedError``
-until the API integration is built out.
+STUBS ONLY for this step. The network calls (:func:`search_text` and
+:func:`get_place_details`) intentionally raise ``NotImplementedError`` until
+the API integration is built out. Search queries are built upstream by
+:func:`src.normalize.build_search_query`.
 
 Planned implementation (Places API - New):
   * ``search_text``       -> POST ``places:searchText`` with a field mask.
@@ -21,26 +21,6 @@ from .config import PLACES_DETAILS_URL, PLACES_TEXT_SEARCH_URL
 
 class PlacesError(RuntimeError):
     """Raised when a Places API request fails."""
-
-
-def build_text_query(
-    practice_name: object,
-    city: object = None,
-    state: object = None,
-) -> str:
-    """Compose a Text Search query string from practice fields.
-
-    Args:
-        practice_name: The business/practice name.
-        city: Optional city to disambiguate the search.
-        state: Optional state to disambiguate the search.
-
-    Returns:
-        A comma-joined query string, e.g. ``"Smile Bright Dental, San
-        Francisco, CA"``.
-    """
-    parts = [practice_name, city, state]
-    return ", ".join(str(p).strip() for p in parts if p and str(p).strip())
 
 
 def search_text(
