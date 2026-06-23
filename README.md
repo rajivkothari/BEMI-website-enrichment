@@ -8,19 +8,21 @@ For each row it searches Google Places by name + location, picks the best
 candidate, fetches its details (website, phone, address), and scores how
 confident the match is — flagging low-confidence rows for manual review.
 
-> **Status:** Skeleton. The CLI, file I/O, normalization, and scoring are
-> implemented and tested. The live Google Places API calls are stubbed
-> (`google_places.search_text` / `get_place_details` raise
-> `NotImplementedError`); see [Roadmap](#roadmap). Running the tool today
-> produces an output file with every row flagged `needs_review` and an
-> `error` of `not_implemented: ...`, which makes the end-to-end pipeline easy
-> to verify before the API work lands.
+> **Status:** Functional. The CLI, file I/O, normalization, scoring, and the
+> Google Places API (New) client are implemented and tested. Candidate
+> ranking is still naive (first result) and scoring weights are a baseline;
+> see [Roadmap](#roadmap).
+>
+> The Places integration requires the **Places API (New)** to be enabled on
+> your Google Cloud project. If it is not, every row's `error` column will
+> contain a clear `HTTP 403 ... Places API (New) has not been used in
+> project ... or it is disabled` message with a link to enable it.
 
 ## Requirements
 
 - Python 3.11+
 - A Google Maps Platform API key with the **Places API (New)** enabled
-  (only needed once the integration is implemented)
+  ([enable it here](https://console.cloud.google.com/apis/library/places.googleapis.com))
 
 ## Setup
 
@@ -107,7 +109,7 @@ BEMI-website-enrichment/
     ├── config.py             # env loading, column schema, constants
     ├── io.py                 # load/write CSV & XLSX
     ├── normalize.py          # phone / city / state normalization
-    ├── google_places.py      # Places API helpers (stubbed)
+    ├── google_places.py      # GooglePlacesClient (Places API New)
     ├── scoring.py            # match confidence scoring
     └── enrich.py             # orchestration (row -> enriched row)
 ```
@@ -120,21 +122,21 @@ Run the test suite:
 pytest
 ```
 
-The tests cover the normalization helpers (`tests/test_normalize.py`) and the
-match scoring (`tests/test_scoring.py`). `pyproject.toml` sets `pythonpath`
-so `import src` works without installing the package.
+The tests cover the normalization helpers (`tests/test_normalize.py`), the
+match scoring (`tests/test_scoring.py`), and the Places client with mocked
+HTTP (`tests/test_google_places.py`). `pyproject.toml` sets `pythonpath` so
+`import src` works without installing the package.
 
 ## Roadmap
 
-This skeleton is intentionally scoped to the plumbing. Still to do:
+Implemented: CLI, CSV/XLSX I/O, normalization, match scoring, and the Google
+Places API (New) client (`text_search` / `place_details`) with retry/backoff
+on 429, 5xx, and transient network errors. Still to do:
 
-- [ ] Implement `google_places.search_text` (Places API **Text Search**) with
-      an appropriate field mask.
-- [ ] Implement `google_places.get_place_details` (Places API **Details**).
 - [ ] Candidate selection: rank/choose the best result instead of the first.
 - [ ] Tune `scoring.score_match` (weighting, address/city/state agreement,
       website sanity checks).
-- [ ] Rate limiting, retries, and basic caching for API calls.
+- [ ] Per-request rate limiting and basic caching for API calls.
 
 ## Configuration
 
