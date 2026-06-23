@@ -1,7 +1,6 @@
 """Tests for src.google_places (mocked HTTP — no real network calls)."""
 import pytest
 
-from src import google_places
 from src.google_places import GooglePlacesClient, PlacesError
 
 

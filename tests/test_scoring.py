@@ -1,6 +1,4 @@
 """Tests for src.scoring."""
-import pytest
-
 from src import scoring
 from src.scoring import score_match
 

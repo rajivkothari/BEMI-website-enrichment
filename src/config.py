@@ -7,7 +7,7 @@ modules so there is a single source of truth for the output layout.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 
@@ -52,23 +52,21 @@ OUTPUT_COLUMNS = INPUT_COLUMNS + ENRICHMENT_COLUMNS
 # Default region used when parsing phone numbers without a country code.
 DEFAULT_REGION = "US"
 
-# Confidence (0.0-1.0) at or above which a match is trusted; below this a
-# row is flagged with ``needs_review = True``.
-REVIEW_THRESHOLD = 0.75
-
-# Google Places API (New) endpoints. The actual requests are implemented in
-# ``google_places.py`` in a later step.
+# Google Places API (New) endpoints (requests live in ``google_places.py``).
 PLACES_TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
 PLACES_DETAILS_URL = "https://places.googleapis.com/v1/places/{place_id}"
 
 
 @dataclass
 class Settings:
-    """Runtime configuration resolved from the environment and CLI flags."""
+    """Runtime configuration resolved from the environment and CLI flags.
 
-    api_key: str | None = None
+    ``api_key`` is excluded from ``repr`` so it can't leak into logs/tracebacks.
+    """
+
+    # repr=False keeps the key out of any accidental log/traceback of Settings.
+    api_key: str | None = field(default=None, repr=False)
     region: str = DEFAULT_REGION
-    review_threshold: float = REVIEW_THRESHOLD
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -76,7 +74,4 @@ class Settings:
         return cls(
             api_key=os.getenv("GOOGLE_MAPS_API_KEY"),
             region=os.getenv("ENRICH_REGION", DEFAULT_REGION),
-            review_threshold=float(
-                os.getenv("ENRICH_REVIEW_THRESHOLD", str(REVIEW_THRESHOLD))
-            ),
         )

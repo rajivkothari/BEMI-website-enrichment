@@ -37,20 +37,40 @@ python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 
 # 3. Install dependencies
-pip install -r requirements.txt
+pip install -r requirements.txt        # or: make install
 
 # 4. Configure your API key
 cp .env.example .env
 # then edit .env and set GOOGLE_MAPS_API_KEY
 ```
 
+Common tasks are also wrapped in a `Makefile`:
+
+```bash
+make install   # pip install -r requirements.txt
+make test      # run the test suite (no network)
+make sample    # enrich input/sample_practices.csv -> output/sample_enriched.xlsx
+```
+
 ## Usage
 
 ```bash
+# Basic: enrich a CSV (or XLSX), inferring format from the extension.
 python -m src.cli input/sample_practices.csv --output output/enriched.csv
 
-# validate inputs without spending API quota, with per-row logging:
+# Validate inputs without spending API quota (no key needed), per-row logging.
 python -m src.cli input/sample_practices.csv --dry-run --limit 5 --verbose
+
+# Highest confidence: verify each homepage and emit a styled XLSX for review.
+python -m src.cli input/sample_practices.xlsx --output output/enriched.xlsx --verify-websites
+
+# Large file: checkpoint every 100 rows; rerun the same command with --resume
+# if it is interrupted.
+python -m src.cli input/big.xlsx --output output/big.enriched.xlsx --checkpoint-every 100 --resume
+
+# Also emit Bullseye-compatible payloads (JSON Lines).
+python -m src.cli input/practices.csv --output output/enriched.csv \
+    --bullseye-json output/bullseye_payload.jsonl
 ```
 
 The input is a positional argument. Options:
@@ -219,11 +239,12 @@ export-only — it does not connect to any Bullseye database or API.
 ```
 BEMI-website-enrichment/
 ├── README.md
+├── Makefile                  # install / test / sample
 ├── requirements.txt
 ├── pyproject.toml            # project metadata + pytest config
 ├── .env.example              # template for your local .env
 ├── input/
-│   └── sample_practices.csv  # example input
+│   └── sample_practices.csv  # example input (5 sample rows)
 ├── output/                   # generated outputs (gitignored)
 └── src/
     ├── cli.py                # argument parsing + entry point
@@ -281,5 +302,28 @@ Environment variables (set in `.env`, see [`.env.example`](.env.example)):
 | -------------------------- | ------- | --------------------------------------------- |
 | `GOOGLE_MAPS_API_KEY`      | —       | Google Maps Platform API key.                 |
 | `ENRICH_REGION`            | `US`    | Default region for phone parsing.             |
-| `ENRICH_REVIEW_THRESHOLD`  | `0.75`  | Confidence below which a row needs review.    |
-```
+
+The API key is read from the environment / `.env` only, is sent solely in the
+`X-Goog-Api-Key` request header, and is never written to logs or output. Keep
+`.env` out of version control (it is gitignored).
+
+## Known limitations
+
+This tool proposes likely official websites; it does not guarantee them.
+Treat the output as a strong starting point for human review, not ground truth:
+
+- **Google may return a parent organization** (e.g. a hospital network or
+  franchise brand) instead of the specific practice you searched for.
+- **Multi-location practices require review** — the matched location (and its
+  website/phone) may not be the one in your row.
+- **Directory/social URLs are not official websites.** Yelp, Facebook,
+  Healthgrades, Zocdoc, etc. are flagged and left out of
+  `official_website_candidate`; a real site may still need to be found.
+- **Phone numbers can be reused or shared** across practices (answering
+  services, billing offices, suites), so a phone match is suggestive, not
+  proof.
+- **Some practices have no standalone website** (only a directory listing or a
+  parent-org page), so no official website will be found.
+- **API usage may incur Google Maps Platform costs.** Text Search and Place
+  Details are billable; the local cache (`--cache-db`) and `--dry-run` help
+  keep usage (and spend) down.

@@ -7,7 +7,7 @@ none), a ``numeric_score`` (0-100), a human-readable ``match_reason``, and a
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Mapping, Optional
 from urllib.parse import urlparse
 
 from rapidfuzz import fuzz

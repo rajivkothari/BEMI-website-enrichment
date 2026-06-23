@@ -242,7 +242,6 @@ class TestCheckpoint:
         assert first.iloc[2]["google_place_id"] == ""   # pending -> blank but valid
 
     def test_disabled_when_zero(self):
-        df = _df(ROW, ROW)
         snapshots = []
         enrich.enrich_table(_df(ROW, ROW), client=FakeClient(results=[make_candidate()]),
                             fetch_details=False, checkpoint_every=0, on_checkpoint=snapshots.append)
