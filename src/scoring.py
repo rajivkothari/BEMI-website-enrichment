@@ -1,99 +1,224 @@
-"""Match-scoring helpers.
+"""Match-scoring for a single Google Places candidate against an input row.
 
-Given an input record and a Google Places candidate, produce a confidence
-score, a human-readable reason, and a ``needs_review`` flag. The individual
-signal helpers (name similarity, phone agreement) are implemented; the way
-they are combined in :func:`score_match` is an intentionally simple baseline
-that will be tuned once the Places integration returns real candidates.
+:func:`score_match` assigns a categorical ``confidence`` (high/medium/low/
+none), a ``numeric_score`` (0-100), a human-readable ``match_reason``, and a
+``needs_review`` flag, following the rules documented inline below.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
-from typing import Mapping, Optional
+from typing import Any, Mapping
+from urllib.parse import urlparse
 
 from rapidfuzz import fuzz
 
 from . import normalize
-from .config import DEFAULT_REGION, REVIEW_THRESHOLD
+
+# Directory / social / aggregator domains that are not a practice's own
+# official website. A candidate whose only website is one of these is flagged
+# and not treated as an official site.
+DIRECTORY_DOMAINS = (
+    "facebook.com", "yelp.com", "healthgrades.com", "zocdoc.com", "vitals.com",
+    "webmd.com", "yellowpages.com", "mapquest.com", "doximity.com",
+)
+
+# Point values per signal.
+_PTS_PHONE = 45
+_PTS_CITY = 20
+_PTS_STATE = 10
+_PTS_NAME_STRONG = 20    # fuzzy name >= 90
+_PTS_NAME_PARTIAL = 10   # fuzzy name 75-89
+_PTS_WEBSITE = 10        # official (non-directory) website present
+_PTS_NOT_OPERATIONAL = -30
+
+# Fuzzy-name thresholds (token-sort ratio, 0-100).
+_NAME_STRONG = 90
+_NAME_PARTIAL = 75
 
 
 @dataclass
 class MatchResult:
-    """The outcome of scoring a single candidate against an input record."""
+    """Outcome of scoring one candidate against one input row."""
 
-    confidence: float = 0.0
-    reason: str = ""
-    needs_review: bool = True
+    confidence: str       # "high" | "medium" | "low" | "none"
+    numeric_score: int    # 0-100
+    match_reason: str
+    needs_review: bool
 
 
-def name_similarity(input_name: object, google_name: object) -> float:
-    """Fuzzy similarity between two names, scaled to ``0.0``-``1.0``.
+def _domain_of(url: str) -> str:
+    """Return the bare host (lowercased, no ``www.``/port) of a URL."""
+    if not url:
+        return ""
+    parsed = urlparse(url if "//" in url else "http://" + url)
+    host = parsed.netloc.lower().split(":")[0]
+    return host[4:] if host.startswith("www.") else host
 
-    Uses token-sort ratio so word order does not matter (``"Bright Smile
-    Dental"`` ~ ``"Smile Bright Dental"``).
+
+def is_directory_website(url: str) -> bool:
+    """True if ``url`` points at a known directory/social/aggregator site."""
+    host = _domain_of(url)
+    if not host:
+        return False
+    return any(host == d or host.endswith("." + d) for d in DIRECTORY_DOMAINS)
+
+
+def _phone_matches(row_phone: Any, candidate: Mapping[str, Any]) -> bool:
+    """True if the input phone equals either candidate phone (by E.164)."""
+    target = normalize.normalize_phone(row_phone)["e164"]
+    if not target:
+        return False
+    for key in ("national_phone", "international_phone"):
+        candidate_e164 = normalize.normalize_phone(candidate.get(key))["e164"]
+        if candidate_e164 and candidate_e164 == target:
+            return True
+    return False
+
+
+def _name_score(practice_name: Any, candidate_name: Any) -> int:
+    """Token-sort fuzzy ratio (0-100) of the normalized names."""
+    a = normalize.normalize_text(practice_name)
+    b = normalize.normalize_text(candidate_name)
+    if not a or not b:
+        return 0
+    return int(round(fuzz.token_sort_ratio(a, b)))
+
+
+def _city_in_address(formatted_address: Any, city: Any) -> bool:
+    city_norm = normalize.normalize_text(city)
+    if not city_norm:
+        return False
+    return city_norm in normalize.normalize_text(formatted_address)
+
+
+def _state_in_address(formatted_address: Any, state: Any) -> bool:
+    if not state or not formatted_address:
+        return False
+    address = str(formatted_address)
+    # Prefer a case-sensitive match on the uppercase USPS code (e.g. "CA"),
+    # which avoids false positives from lowercase words like "or"/"in".
+    abbrev = normalize.normalize_state(state)
+    if abbrev and re.search(rf"\b{re.escape(abbrev)}\b", address):
+        return True
+    state_norm = normalize.normalize_text(state)
+    return bool(state_norm) and state_norm in normalize.normalize_text(address)
+
+
+def _confidence_level(
+    score: int,
+    *,
+    official_website: bool,
+    phone_match: bool,
+    strong_name_location: bool,
+) -> str:
+    """Bucket a score into a confidence label, honoring the gating rules.
+
+    A score may only be "high" with an official website and either a phone
+    match or a very strong name+location match. Otherwise it falls through to
+    the numeric bands (non-high scores >= 60 are reported as "medium").
     """
-    if not input_name or not google_name:
-        return 0.0
-    return fuzz.token_sort_ratio(str(input_name), str(google_name)) / 100.0
-
-
-def phone_match(
-    input_phone: object,
-    google_phone: object,
-    region: str = DEFAULT_REGION,
-) -> Optional[bool]:
-    """Compare two phone numbers after normalization.
-
-    Returns:
-        ``True`` if both normalize to the same E.164 number, ``False`` if
-        they differ, or ``None`` if either is missing/unparseable (unknown).
-    """
-    a = normalize.normalize_phone(input_phone, region)["e164"]
-    b = normalize.normalize_phone(google_phone, region)["e164"]
-    if a is None or b is None:
-        return None
-    return a == b
+    if score >= 80 and official_website and (phone_match or strong_name_location):
+        return "high"
+    if score >= 60:
+        return "medium"
+    if score >= 30:
+        return "low"
+    return "none"
 
 
 def score_match(
-    record: Mapping[str, object],
-    candidate: Mapping[str, object],
-    region: str = DEFAULT_REGION,
-    review_threshold: float = REVIEW_THRESHOLD,
+    row: Mapping[str, Any],
+    candidate: Mapping[str, Any],
 ) -> MatchResult:
-    """Combine match signals into a :class:`MatchResult`.
-
-    Baseline heuristic: start from the name similarity, then nudge the score
-    up or down based on whether the phone numbers agree. This is a starting
-    point — weighting, address/city/state agreement, and website sanity
-    checks are TODO once real candidates are available.
+    """Score a Google Places ``candidate`` against an input ``row``.
 
     Args:
-        record: The (normalized) input row, e.g. ``practice_name``/``phone``.
-        candidate: A Google Places candidate with ``google_*`` fields.
-        region: Default phone region for normalization.
-        review_threshold: Confidence below which ``needs_review`` is set.
+        row: ``{"practice_name", "phone", "city", "state"}``.
+        candidate: A normalized Places dict (``name``, ``formatted_address``,
+            ``national_phone``, ``international_phone``, ``website``,
+            ``business_status``, ...).
 
     Returns:
         A :class:`MatchResult`.
     """
-    name = name_similarity(record.get("practice_name"), candidate.get("google_name"))
-    phones = phone_match(record.get("phone"), candidate.get("google_phone"), region)
+    if not candidate or not (candidate.get("place_id") or candidate.get("name")):
+        return MatchResult("none", 0, "no useful candidate", True)
 
-    reasons = [f"name~{name:.2f}"]
-    confidence = name
-    if phones is True:
-        confidence = min(1.0, confidence + 0.2)
-        reasons.append("phone=match")
-    elif phones is False:
-        confidence = max(0.0, confidence - 0.2)
-        reasons.append("phone=mismatch")
+    reasons: list[str] = []
+    score = 0
+
+    # --- Phone (strongest signal) ----------------------------------------
+    phone_match = _phone_matches(row.get("phone"), candidate)
+    if phone_match:
+        score += _PTS_PHONE
+        reasons.append(f"phone match (+{_PTS_PHONE})")
+    elif normalize.normalize_phone(row.get("phone"))["e164"]:
+        reasons.append("phone mismatch")
     else:
-        reasons.append("phone=unknown")
+        reasons.append("no input phone")
 
-    confidence = round(confidence, 3)
-    return MatchResult(
-        confidence=confidence,
-        reason="; ".join(reasons),
-        needs_review=confidence < review_threshold,
+    # --- City / state present in the formatted address -------------------
+    city_match = _city_in_address(candidate.get("formatted_address"), row.get("city"))
+    if city_match:
+        score += _PTS_CITY
+        reasons.append(f"city in address (+{_PTS_CITY})")
+    else:
+        reasons.append("city not in address")
+
+    state_match = _state_in_address(candidate.get("formatted_address"), row.get("state"))
+    if state_match:
+        score += _PTS_STATE
+        reasons.append(f"state in address (+{_PTS_STATE})")
+    else:
+        reasons.append("state not in address")
+
+    # --- Fuzzy name match ------------------------------------------------
+    name = _name_score(row.get("practice_name"), candidate.get("name"))
+    if name >= _NAME_STRONG:
+        score += _PTS_NAME_STRONG
+        reasons.append(f"name {name} (+{_PTS_NAME_STRONG})")
+    elif name >= _NAME_PARTIAL:
+        score += _PTS_NAME_PARTIAL
+        reasons.append(f"name {name} (+{_PTS_NAME_PARTIAL})")
+    else:
+        reasons.append(f"name {name}")
+
+    # --- Website ---------------------------------------------------------
+    website = str(candidate.get("website") or "").strip()
+    has_website = bool(website)
+    directory = is_directory_website(website)
+    official_website = has_website and not directory
+    if official_website:
+        score += _PTS_WEBSITE
+        reasons.append(f"official website (+{_PTS_WEBSITE})")
+    elif directory:
+        reasons.append(f"directory website: {_domain_of(website)}")
+    else:
+        reasons.append("no website")
+
+    # --- Business status -------------------------------------------------
+    status = str(candidate.get("business_status") or "").strip()
+    if status and status.upper() != "OPERATIONAL":
+        score += _PTS_NOT_OPERATIONAL
+        reasons.append(f"not operational: {status} ({_PTS_NOT_OPERATIONAL})")
+
+    score = max(0, min(100, score))
+
+    strong_name_location = name >= _NAME_STRONG and city_match and state_match
+    confidence = _confidence_level(
+        score,
+        official_website=official_website,
+        phone_match=phone_match,
+        strong_name_location=strong_name_location,
     )
+
+    needs_review = (
+        confidence != "high"
+        or not has_website
+        or directory
+        or not phone_match
+    )
+
+    match_reason = f"score={score}; confidence={confidence}; " + "; ".join(reasons)
+    return MatchResult(confidence, score, match_reason, needs_review)

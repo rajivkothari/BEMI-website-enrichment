@@ -72,20 +72,12 @@ def enrich_record(
         if best is None:
             row["match_reason"] = "no_candidates"
             return row
+        if not best.get("place_id"):
+            row["match_reason"] = "no_place_id"
+            return row
 
         details = client.place_details(best["place_id"])
-
-        # Map the normalized Google fields onto the scorer's expected keys.
-        candidate = {
-            "google_name": details.get("name", ""),
-            "google_phone": _best_phone(details),
-        }
-        result = scoring.score_match(
-            norm,
-            candidate,
-            region=settings.region,
-            review_threshold=settings.review_threshold,
-        )
+        result = scoring.score_match(record, details)
         row.update(
             {
                 "google_place_id": details.get("place_id", ""),
@@ -94,7 +86,7 @@ def enrich_record(
                 "google_phone": _best_phone(details),
                 "google_website": details.get("website", ""),
                 "match_confidence": result.confidence,
-                "match_reason": result.reason,
+                "match_reason": result.match_reason,
                 "needs_review": result.needs_review,
             }
         )

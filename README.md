@@ -88,9 +88,9 @@ The output preserves the input columns and appends the enrichment results:
 | `google_formatted_address` | Formatted address from Google.                          |
 | `google_phone`             | Phone number from Google.                               |
 | `google_website`           | Website URL from Google (the primary goal).             |
-| `match_confidence`         | Confidence score, `0.0`–`1.0`.                          |
-| `match_reason`             | Short, human-readable explanation of the score.         |
-| `needs_review`             | `True` when confidence is below the review threshold.   |
+| `match_confidence`         | Confidence label: `high` / `medium` / `low` / `none`.   |
+| `match_reason`             | Human-readable explanation incl. the numeric score.     |
+| `needs_review`             | `True` unless the match is high-confidence and verified.|
 | `error`                    | Error message if the row could not be processed.        |
 
 ## Project structure
@@ -129,13 +129,16 @@ HTTP (`tests/test_google_places.py`). `pyproject.toml` sets `pythonpath` so
 
 ## Roadmap
 
-Implemented: CLI, CSV/XLSX I/O, normalization, match scoring, and the Google
-Places API (New) client (`text_search` / `place_details`) with retry/backoff
-on 429, 5xx, and transient network errors. Still to do:
+Implemented: CLI, CSV/XLSX I/O, normalization, the Google Places API (New)
+client (`text_search` / `place_details`) with retry/backoff on 429, 5xx, and
+transient network errors, and rule-based candidate scoring (phone/city/state/
+name/website signals, directory-site detection, business-status penalty)
+producing a `high`/`medium`/`low`/`none` confidence with a `needs_review`
+flag. Still to do:
 
-- [ ] Candidate selection: rank/choose the best result instead of the first.
-- [ ] Tune `scoring.score_match` (weighting, address/city/state agreement,
-      website sanity checks).
+- [ ] Candidate selection: rank candidates and score them all, instead of
+      taking (and scoring) only the first text-search result.
+- [ ] Tune the scoring weights/thresholds against labeled data.
 - [ ] Per-request rate limiting and basic caching for API calls.
 
 ## Configuration
