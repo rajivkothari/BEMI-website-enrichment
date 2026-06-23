@@ -64,6 +64,8 @@ class SQLiteCache:
         self._conn = sqlite3.connect(str(self.db_path))
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
+        self.hits = 0
+        self.misses = 0
 
     # -- text search ------------------------------------------------------
 
@@ -79,7 +81,7 @@ class SQLiteCache:
             "SELECT response_json, created_at FROM text_search_cache WHERE cache_key = ?",
             (self.text_search_key(query),),
         ).fetchone()
-        return self._unpack(row)
+        return self._record(self._unpack(row))
 
     def set_text_search(
         self, query: Any, response: Any, created_at: Optional[float] = None
@@ -105,7 +107,7 @@ class SQLiteCache:
             "SELECT response_json, created_at FROM place_details_cache WHERE place_id = ?",
             (place_id,),
         ).fetchone()
-        return self._unpack(row)
+        return self._record(self._unpack(row))
 
     def set_place_details(
         self, place_id: str, response: Any, created_at: Optional[float] = None
@@ -123,6 +125,14 @@ class SQLiteCache:
         self._conn.commit()
 
     # -- helpers ----------------------------------------------------------
+
+    def _record(self, value: Optional[Any]) -> Optional[Any]:
+        """Tally a hit/miss and pass the value through."""
+        if value is None:
+            self.misses += 1
+        else:
+            self.hits += 1
+        return value
 
     def _unpack(self, row: Optional[tuple]) -> Optional[Any]:
         if row is None:

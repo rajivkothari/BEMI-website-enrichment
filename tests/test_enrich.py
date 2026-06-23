@@ -28,6 +28,7 @@ class FakeClient:
         self.fail = fail
         self.search_calls = []
         self.details_calls = []
+        self.api_call_count = 0  # mirrors GooglePlacesClient's interface
 
     def text_search(self, query, city=None, state=None):
         self.search_calls.append(query)
@@ -215,6 +216,10 @@ class TestCli:
         written = pd.read_csv(out)
         assert list(written.columns) == INPUT_COLUMNS + ENRICHMENT_COLUMNS
         assert written.iloc[0]["google_name"] == "Acme Dental"
+
+        # Audit artifacts land alongside the output.
+        assert (tmp_path / "enrichment_events.csv").exists()
+        assert list(tmp_path.glob("run_log_*.json"))
 
     def test_missing_api_key_exits_nonzero(self, monkeypatch, tmp_path):
         def boom(api_key=None, **kw):

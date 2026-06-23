@@ -9,9 +9,11 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Sequence
 
+from . import audit
 from . import google_places
 from . import io as table_io
 from .cache import DEFAULT_TTL_DAYS, SQLiteCache
@@ -118,6 +120,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     """Run the enrichment pipeline. Returns a process exit code."""
     args = build_parser().parse_args(argv)
     _configure_logging(args.verbose)
+    started_at = datetime.now()
 
     settings = Settings.from_env()
     if args.region:
@@ -166,6 +169,36 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         out_path = args.output or _default_output(args.input)
         table_io.write_table(enriched, out_path)
         logger.info("Wrote %d rows to %s", len(enriched), out_path)
+
+        flags = {
+            "limit": args.limit,
+            "no_details": args.no_details,
+            "verify_websites": args.verify_websites,
+            "no_cache": args.no_cache,
+            "cache_db": str(args.cache_db),
+            "cache_ttl_days": args.cache_ttl_days,
+            "region": settings.region,
+        }
+        run_log_path, events_path, run_log = audit.write_audit(
+            enriched,
+            input_file=args.input,
+            output_file=out_path,
+            started_at=started_at,
+            completed_at=datetime.now(),
+            flags=flags,
+            api_calls=client.api_call_count if client else 0,
+            cache_hits=cache.hits if cache else 0,
+            cache_misses=cache.misses if cache else 0,
+            output_dir=out_path.parent,
+        )
+        logger.info("Audit log: %s | events: %s", run_log_path, events_path)
+        logger.info(
+            "Summary: %d/%d enriched, %d need review, %d errors; "
+            "api_calls~%d, cache hits/misses %d/%d",
+            run_log["enriched_count"], run_log["row_count"],
+            run_log["needs_review_count"], run_log["errors_count"],
+            run_log["api_calls_estimated"], run_log["cache_hits"], run_log["cache_misses"],
+        )
         return 0
     finally:
         if cache is not None:

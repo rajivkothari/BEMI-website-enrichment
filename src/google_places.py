@@ -86,6 +86,9 @@ class GooglePlacesClient:
         self.max_retries = max_retries
         self.backoff_base = backoff_base
         self.cache = cache
+        # Count of logical Places API calls actually sent (cache misses /
+        # uncached calls); retries within a call are not counted separately.
+        self.api_call_count = 0
 
     # -- Public API --------------------------------------------------------
 
@@ -169,6 +172,7 @@ class GooglePlacesClient:
         """Send a request with retry/backoff for 429, 5xx, and network errors."""
         headers = self._headers(field_mask, json_body=payload is not None)
         last_error = "unknown error"
+        self.api_call_count += 1
 
         for attempt in range(self.max_retries + 1):
             try:

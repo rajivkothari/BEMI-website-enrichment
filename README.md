@@ -154,6 +154,20 @@ then in the spreadsheet:
 
 High-confidence rows (green, `needs_review = FALSE`) generally need no action.
 
+## Audit logs
+
+Every (non-dry-run) run writes two artifacts next to the output file:
+
+- **`run_log_{timestamp}.json`** — run metadata and summary counts: input/output
+  files, `started_at`/`completed_at`, `row_count`, `enriched_count`,
+  `high`/`medium`/`low_confidence_count`, `needs_review_count`, `errors_count`,
+  `api_calls_estimated` (Places API calls actually sent), `cache_hits`,
+  `cache_misses`, and the `flags` used.
+- **`enrichment_events.csv`** — one row per input row: `row_index`,
+  `practice_name`, `phone`, `city`, `state`, `selected_place_id`,
+  `selected_website`, `score`, `confidence`, `needs_review`, `reason`, `error`
+  (overwritten each run; the JSON log is timestamped, so it accumulates).
+
 ## Project structure
 
 ```
@@ -174,6 +188,7 @@ BEMI-website-enrichment/
     ├── cache.py              # SQLite response cache
     ├── website_verify.py     # optional homepage verification
     ├── excel_format.py       # XLSX styling for human review
+    ├── audit.py              # run log + per-row events
     ├── scoring.py            # match confidence scoring
     └── enrich.py             # orchestration (row -> enriched row)
 ```
@@ -190,9 +205,10 @@ The tests cover normalization (`tests/test_normalize.py`), scoring
 (`tests/test_scoring.py`), the Places client with mocked HTTP
 (`tests/test_google_places.py`), the SQLite cache (`tests/test_cache.py`), website verification
 (`tests/test_website_verify.py`), XLSX review formatting
-(`tests/test_excel_format.py`), and the enrichment/CLI orchestration with a
-fake client (`tests/test_enrich.py`). `pyproject.toml` sets `pythonpath` so
-`import src` works without installing the package.
+(`tests/test_excel_format.py`), audit logging (`tests/test_audit.py`), and the
+enrichment/CLI orchestration with a fake client (`tests/test_enrich.py`).
+`pyproject.toml` sets `pythonpath` so `import src` works without installing the
+package.
 
 ## Roadmap
 
@@ -201,9 +217,9 @@ Implemented: CLI (CSV/XLSX, `--limit`/`--dry-run`/`--no-details`/
 Google Places API (New) client (`text_search` / `place_details`) with
 retry/backoff on 429, 5xx, and transient network errors, rule-based scoring
 with a `high`/`medium`/`low`/`none` confidence, optional homepage
-verification, review-formatted XLSX output, and the end-to-end pipeline that
-scores every candidate, picks the best, completes it via Place Details, and
-re-scores. Still to do:
+verification, review-formatted XLSX output, per-run audit logs, and the
+end-to-end pipeline that scores every candidate, picks the best, completes it
+via Place Details, and re-scores. Still to do:
 
 - [ ] Tune the scoring weights/thresholds against labeled data.
 - [ ] Per-request rate limiting / throttling for API calls.

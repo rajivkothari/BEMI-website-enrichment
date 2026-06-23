@@ -124,3 +124,24 @@ class TestClientCaching:
         client.text_search("Acme Dental")
         client.text_search("Acme Dental")
         assert session.search_calls == 2
+
+
+class TestCounters:
+    def test_cache_and_api_counters_align(self, tmp_path):
+        session = RoutingSession()
+        with SQLiteCache(tmp_path / "c.sqlite") as cache:
+            client = make_client(session, cache)
+            client.text_search("Acme")          # miss -> api call
+            client.text_search("Acme")          # hit
+            client.place_details("ChIJ_acme")   # miss -> api call
+            client.place_details("ChIJ_acme")   # hit
+            assert cache.hits == 2
+            assert cache.misses == 2
+            assert client.api_call_count == 2   # one per miss
+
+    def test_api_count_without_cache(self):
+        session = RoutingSession()
+        client = make_client(session, cache=None)
+        client.text_search("Acme")
+        client.place_details("ChIJ_acme")
+        assert client.api_call_count == 2
