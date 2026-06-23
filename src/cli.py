@@ -95,6 +95,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_TTL_DAYS,
         help="Treat cached entries older than this many days as misses.",
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume from an existing output file: skip rows that already have "
+        "a google_place_id or error.",
+    )
+    parser.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=50,
+        help="Write partial output every N enriched rows (0 disables).",
+    )
     return parser
 
 
@@ -136,6 +148,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         df = df.head(args.limit)
     logger.info("Loaded %d rows from %s", len(df), args.input)
 
+    out_path = args.output or _default_output(args.input)
+
+    # Resume: load any existing output to skip already-enriched rows.
+    prior = None
+    if args.resume and not args.dry_run:
+        if out_path.exists():
+            try:
+                prior = table_io.load_table(out_path)
+                logger.info("Resume: loaded %d existing rows from %s", len(prior), out_path)
+            except (FileNotFoundError, ValueError) as exc:
+                logger.warning("Resume: could not read %s (%s); starting fresh", out_path, exc)
+        else:
+            logger.info("Resume requested but %s does not exist; starting fresh", out_path)
+
     # Build the cache and Places client up front (unless this is a dry run) so
     # a missing key fails fast with a clear message instead of erroring rows.
     cache = None
@@ -152,6 +178,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 cache.close()
             return 2
 
+    def _checkpoint(partial) -> None:
+        table_io.write_table(partial, out_path)
+        logger.info("Checkpoint: wrote %d rows to %s", len(partial), out_path)
+
     try:
         enriched = enrich_table(
             df,
@@ -160,13 +190,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             fetch_details=not args.no_details,
             verify_websites=args.verify_websites,
             dry_run=args.dry_run,
+            prior=prior,
+            checkpoint_every=args.checkpoint_every,
+            on_checkpoint=_checkpoint,
         )
 
         if args.dry_run:
             logger.info("Dry run complete; no output written.")
             return 0
 
-        out_path = args.output or _default_output(args.input)
         table_io.write_table(enriched, out_path)
         logger.info("Wrote %d rows to %s", len(enriched), out_path)
 

@@ -16,7 +16,7 @@ than aborting the whole run.
 from __future__ import annotations
 
 import logging
-from typing import Any, List, Mapping, Optional, Sequence
+from typing import Any, Callable, List, Mapping, Optional, Sequence
 
 import pandas as pd
 import requests
@@ -165,6 +165,15 @@ def _dry_run_row(record: Mapping[str, Any], columns: Sequence[str], region: str)
     return row
 
 
+def _nonempty(value: Any) -> bool:
+    return value is not None and str(value).strip() != ""
+
+
+def _is_done(prior_row: Mapping[str, Any]) -> bool:
+    """A row is 'done' (skippable on resume) once it has a place_id or error."""
+    return _nonempty(prior_row.get("google_place_id")) or _nonempty(prior_row.get("error"))
+
+
 def enrich_table(
     df: pd.DataFrame,
     *,
@@ -174,6 +183,9 @@ def enrich_table(
     verify_websites: bool = False,
     dry_run: bool = False,
     progress_every: int = 25,
+    prior: Optional[pd.DataFrame] = None,
+    checkpoint_every: int = 0,
+    on_checkpoint: Optional[Callable[[pd.DataFrame], None]] = None,
 ) -> pd.DataFrame:
     """Enrich an entire DataFrame, returning a new DataFrame.
 
@@ -185,7 +197,12 @@ def enrich_table(
         verify_websites: Whether to fetch each matched homepage and verify the
             phone/city/state on it (slower; off by default).
         dry_run: If true, normalize + build queries but make no API calls.
-        progress_every: Log an INFO progress line every N rows (0 disables).
+        progress_every: Log an INFO progress line every N enriched rows.
+        prior: Existing output to resume from (row i is reused when it already
+            has a ``google_place_id`` or ``error``), correlated by position.
+        checkpoint_every: Call ``on_checkpoint`` every N newly-enriched rows
+            with the full current output (0 disables).
+        on_checkpoint: Callback receiving the full-length partial DataFrame.
 
     Returns:
         A DataFrame whose columns are the original columns followed by the
@@ -194,42 +211,69 @@ def enrich_table(
     columns = output_columns(df)
     records = df.to_dict("records")
     total = len(records)
-    rows: List[dict] = []
 
     if dry_run:
         logger.info("DRY RUN: normalizing and building queries for %d rows (no API calls)", total)
-        for record in records:
-            rows.append(_dry_run_row(record, columns, region))
+        rows = [_dry_run_row(record, columns, region) for record in records]
         return pd.DataFrame(rows, columns=columns)
 
     if client is None:
         raise google_places.PlacesError("A Places client is required to enrich (or use dry_run=True).")
 
-    # One shared session for homepage fetches (connection reuse).
+    prior_records = prior.to_dict("records") if prior is not None else []
+
+    # Seed every output row: reuse prior data when resuming, else a blank row.
+    # This keeps the partial output full-length (and valid) at every checkpoint.
+    output_rows: List[dict] = []
+    for i, record in enumerate(records):
+        if i < len(prior_records):
+            output_rows.append({col: prior_records[i].get(col, "") for col in columns})
+        else:
+            output_rows.append(_base_row(record, columns, region))
+
+    done = [i < len(prior_records) and _is_done(prior_records[i]) for i in range(total)]
+    skipped = sum(done)
+
     verify_session = requests.Session() if verify_websites else None
-    logger.info("Enriching %d rows (fetch_details=%s, verify_websites=%s)",
-                total, fetch_details, verify_websites)
+    logger.info(
+        "Enriching %d rows (fetch_details=%s, verify_websites=%s); %d already done (resumed)",
+        total, fetch_details, verify_websites, skipped,
+    )
+
+    processed = 0
     try:
-        for index, record in enumerate(records, start=1):
-            row = enrich_record(
+        for i, record in enumerate(records):
+            if done[i]:
+                continue
+            output_rows[i] = enrich_record(
                 record, client, columns,
                 region=region, fetch_details=fetch_details,
                 verify_websites=verify_websites, verify_session=verify_session,
             )
-            rows.append(row)
-            if row.get("error"):
-                logger.debug("row %d error: %s", index, row["error"])
+            processed += 1
+
+            if output_rows[i].get("error"):
+                logger.debug("row %d error: %s", i + 1, output_rows[i]["error"])
             else:
                 logger.debug(
                     "row %d: %r -> %r (score=%s, %s)",
-                    index, record.get("practice_name"), row.get("google_name"),
-                    row.get("match_score"), row.get("match_confidence"),
+                    i + 1, record.get("practice_name"), output_rows[i].get("google_name"),
+                    output_rows[i].get("match_score"), output_rows[i].get("match_confidence"),
                 )
-            if progress_every and index % progress_every == 0:
-                logger.info("Processed %d/%d rows", index, total)
+            if progress_every and processed % progress_every == 0:
+                logger.info("Processed %d new rows (%d/%d total)", processed, i + 1, total)
+            if checkpoint_every and on_checkpoint and processed % checkpoint_every == 0:
+                on_checkpoint(pd.DataFrame(output_rows, columns=columns))
     finally:
         if verify_session is not None:
             verify_session.close()
 
-    logger.info("Done: %d rows (%d need review)", total, sum(1 for r in rows if r.get("needs_review")))
-    return pd.DataFrame(rows, columns=columns)
+    logger.info(
+        "Done: %d rows (%d enriched this run, %d reused, %d need review)",
+        total, processed, skipped, sum(1 for r in output_rows if _is_true(r.get("needs_review"))),
+    )
+    return pd.DataFrame(output_rows, columns=columns)
+
+
+def _is_true(value: Any) -> bool:
+    return value is True or str(value).strip().lower() == "true"

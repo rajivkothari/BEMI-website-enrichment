@@ -5,6 +5,8 @@ from the path extension so the CLI can accept and emit either CSV or Excel.
 """
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 from typing import Union
 
@@ -65,15 +67,27 @@ def write_table(df: pd.DataFrame, path: PathLike) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     suffix = path.suffix.lower()
-    if suffix in _CSV_SUFFIXES:
-        df.to_csv(path, index=False)
-    elif suffix in _EXCEL_SUFFIXES:
-        # Imported lazily so CSV-only use doesn't require the styling code.
-        from .excel_format import write_formatted_xlsx
-
-        write_formatted_xlsx(df, path)
-    else:
+    if suffix not in _CSV_SUFFIXES and suffix not in _EXCEL_SUFFIXES:
         raise ValueError(
             f"Unsupported output format: {suffix!r} (expected .csv, .xlsx, or .xls)"
         )
+
+    # Write to a temp file in the same directory and atomically replace the
+    # target, so an interrupted write (e.g. a checkpoint) never leaves a
+    # half-written, invalid output file behind.
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.stem}.", suffix=suffix, dir=str(path.parent))
+    os.close(fd)
+    tmp = Path(tmp_name)
+    try:
+        if suffix in _CSV_SUFFIXES:
+            df.to_csv(tmp, index=False)
+        else:
+            # Imported lazily so CSV-only use doesn't require the styling code.
+            from .excel_format import write_formatted_xlsx
+
+            write_formatted_xlsx(df, tmp)
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
     return path

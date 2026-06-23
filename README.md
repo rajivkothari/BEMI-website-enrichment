@@ -68,9 +68,27 @@ The input is a positional argument. Options:
 | `--cache-db PATH`| SQLite cache file (default `.cache/enrichment_cache.sqlite`).         |
 | `--no-cache`     | Disable the response cache (always call the API).                     |
 | `--cache-ttl-days N` | Refresh cached entries older than N days (default 30).           |
+| `--resume`       | Resume from an existing output file: skip rows that already have a `google_place_id` or `error`. |
+| `--checkpoint-every N` | Write partial output every N enriched rows (default 50; 0 disables). |
 
 Input and output format (CSV vs. XLSX) is inferred from the file extension.
 Progress is logged every 25 rows; the API key is never written to logs.
+
+### Resuming large files
+
+Runs checkpoint the **full** output every `--checkpoint-every` rows (default
+50), and writes are atomic (temp file + rename) so a partial file is always a
+valid CSV/XLSX. If a run is interrupted, rerun the same command with
+`--resume`: rows that already have a `google_place_id` or `error` are kept
+as-is (no API call), and only the remaining rows are processed.
+
+```bash
+python -m src.cli input/practices.xlsx --output output/enriched.xlsx --resume --checkpoint-every 25
+```
+
+For very large inputs, raise `--checkpoint-every` (e.g. `500`) to reduce how
+often the full file is rewritten. Note: errored rows are treated as done and
+skipped on resume; delete the output (or clear their `error`) to retry them.
 
 ### Caching
 
@@ -213,13 +231,14 @@ package.
 ## Roadmap
 
 Implemented: CLI (CSV/XLSX, `--limit`/`--dry-run`/`--no-details`/
-`--verify-websites`/`--verbose`, SQLite response cache), normalization, the
-Google Places API (New) client (`text_search` / `place_details`) with
-retry/backoff on 429, 5xx, and transient network errors, rule-based scoring
-with a `high`/`medium`/`low`/`none` confidence, optional homepage
-verification, review-formatted XLSX output, per-run audit logs, and the
-end-to-end pipeline that scores every candidate, picks the best, completes it
-via Place Details, and re-scores. Still to do:
+`--verify-websites`/`--verbose`, SQLite response cache, `--resume` +
+checkpointing with atomic writes), normalization, the Google Places API (New)
+client (`text_search` / `place_details`) with retry/backoff on 429, 5xx, and
+transient network errors, rule-based scoring with a `high`/`medium`/`low`/
+`none` confidence, optional homepage verification, review-formatted XLSX
+output, per-run audit logs, and the end-to-end pipeline that scores every
+candidate, picks the best, completes it via Place Details, and re-scores.
+Still to do:
 
 - [ ] Tune the scoring weights/thresholds against labeled data.
 - [ ] Per-request rate limiting / throttling for API calls.

@@ -191,6 +191,64 @@ class TestVerifyWebsites:
         assert result.iloc[0]["verification_notes"] == ""
 
 
+class TestResume:
+    def _prior_row(self, cols, **over):
+        row = {c: "" for c in cols}
+        row.update(ROW)
+        row.update(over)
+        return row
+
+    def test_skips_rows_with_place_id_or_error(self):
+        df = _df(ROW, ROW, ROW)
+        cols = enrich.output_columns(df)
+        prior = pd.DataFrame([
+            self._prior_row(cols, google_place_id="PRIOR0", google_name="Prior Co"),
+            self._prior_row(cols, error="places_error: old"),
+            self._prior_row(cols),  # blank -> not done
+        ])
+        client = FakeClient(results=[make_candidate()])
+        out = enrich.enrich_table(df, client=client, fetch_details=False, prior=prior)
+
+        assert len(client.search_calls) == 1          # only the not-done row hit the API
+        assert out.iloc[0]["google_place_id"] == "PRIOR0"   # reused
+        assert out.iloc[0]["google_name"] == "Prior Co"
+        assert out.iloc[1]["error"] == "places_error: old"  # reused (errors are skipped)
+        assert out.iloc[2]["google_place_id"] == "A"        # freshly enriched
+
+    def test_extra_input_rows_beyond_prior_are_enriched(self):
+        df = _df(ROW, ROW)
+        cols = enrich.output_columns(df)
+        prior = pd.DataFrame([self._prior_row(cols, google_place_id="DONE")])  # only 1 prior row
+        client = FakeClient(results=[make_candidate()])
+        out = enrich.enrich_table(df, client=client, fetch_details=False, prior=prior)
+        assert len(client.search_calls) == 1
+        assert out.iloc[0]["google_place_id"] == "DONE"
+        assert out.iloc[1]["google_place_id"] == "A"
+
+
+class TestCheckpoint:
+    def test_fires_every_n_with_full_length_frames(self):
+        df = _df(ROW, ROW, ROW, ROW, ROW)
+        client = FakeClient(results=[make_candidate()])
+        snapshots = []
+        enrich.enrich_table(df, client=client, fetch_details=False,
+                            checkpoint_every=2, on_checkpoint=snapshots.append)
+
+        assert len(snapshots) == 2                      # fires after rows 2 and 4 (not the final 5th)
+        assert all(len(s) == 5 for s in snapshots)      # always full length
+        first = snapshots[0]
+        assert first.iloc[0]["google_place_id"] == "A"  # processed
+        assert first.iloc[1]["google_place_id"] == "A"
+        assert first.iloc[2]["google_place_id"] == ""   # pending -> blank but valid
+
+    def test_disabled_when_zero(self):
+        df = _df(ROW, ROW)
+        snapshots = []
+        enrich.enrich_table(_df(ROW, ROW), client=FakeClient(results=[make_candidate()]),
+                            fetch_details=False, checkpoint_every=0, on_checkpoint=snapshots.append)
+        assert snapshots == []
+
+
 class TestCli:
     def test_dry_run_writes_no_output(self, tmp_path):
         src_csv = tmp_path / "in.csv"
@@ -220,6 +278,38 @@ class TestCli:
         # Audit artifacts land alongside the output.
         assert (tmp_path / "enrichment_events.csv").exists()
         assert list(tmp_path.glob("run_log_*.json"))
+
+    def test_resume_skips_already_enriched_rows(self, monkeypatch, tmp_path):
+        fake = FakeClient(results=[make_candidate()])
+        monkeypatch.setattr(google_places, "GooglePlacesClient",
+                            lambda api_key=None, **kw: fake)
+        src_csv = tmp_path / "in.csv"
+        pd.DataFrame([ROW, {**ROW, "practice_name": "Beta Clinic"}]).to_csv(src_csv, index=False)
+        out = tmp_path / "out.csv"
+
+        # First run enriches both rows.
+        cli.main([str(src_csv), "--output", str(out), "--no-cache"])
+        assert len(fake.search_calls) == 2
+
+        # Second run with --resume: both rows already done, so no new API work.
+        cli.main([str(src_csv), "--output", str(out), "--no-cache", "--resume"])
+        assert len(fake.search_calls) == 2
+
+        written = pd.read_csv(out)
+        assert len(written) == 2  # still a complete, valid file
+
+    def test_resume_with_xlsx_output(self, monkeypatch, tmp_path):
+        fake = FakeClient(results=[make_candidate()])
+        monkeypatch.setattr(google_places, "GooglePlacesClient",
+                            lambda api_key=None, **kw: fake)
+        src = tmp_path / "in.csv"
+        pd.DataFrame([ROW]).to_csv(src, index=False)
+        out = tmp_path / "out.xlsx"
+
+        cli.main([str(src), "--output", str(out), "--no-cache", "--checkpoint-every", "1"])
+        assert out.exists()
+        cli.main([str(src), "--output", str(out), "--no-cache", "--resume"])
+        assert len(fake.search_calls) == 1  # the one row was already done
 
     def test_missing_api_key_exits_nonzero(self, monkeypatch, tmp_path):
         def boom(api_key=None, **kw):
