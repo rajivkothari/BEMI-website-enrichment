@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from . import audit
+from . import bullseye_export
 from . import google_places
 from . import io as table_io
 from .cache import DEFAULT_TTL_DAYS, SQLiteCache
@@ -106,6 +107,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=50,
         help="Write partial output every N enriched rows (0 disables).",
+    )
+    parser.add_argument(
+        "--bullseye-json",
+        type=Path,
+        default=None,
+        help="Also write Bullseye-compatible enrichment payloads (JSON Lines) to this path.",
     )
     return parser
 
@@ -231,6 +238,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             run_log["needs_review_count"], run_log["errors_count"],
             run_log["api_calls_estimated"], run_log["cache_hits"], run_log["cache_misses"],
         )
+
+        if args.bullseye_json is not None:
+            bullseye_export.write_jsonl(enriched, args.bullseye_json)
+            logger.info("Wrote %d Bullseye payloads to %s", len(enriched), args.bullseye_json)
         return 0
     finally:
         if cache is not None:

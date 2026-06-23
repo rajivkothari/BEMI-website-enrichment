@@ -70,6 +70,7 @@ The input is a positional argument. Options:
 | `--cache-ttl-days N` | Refresh cached entries older than N days (default 30).           |
 | `--resume`       | Resume from an existing output file: skip rows that already have a `google_place_id` or `error`. |
 | `--checkpoint-every N` | Write partial output every N enriched rows (default 50; 0 disables). |
+| `--bullseye-json PATH` | Also write Bullseye-compatible enrichment payloads (JSON Lines). |
 
 Input and output format (CSV vs. XLSX) is inferred from the file extension.
 Progress is logged every 25 rows; the API key is never written to logs.
@@ -186,6 +187,33 @@ Every (non-dry-run) run writes two artifacts next to the output file:
   `selected_website`, `score`, `confidence`, `needs_review`, `reason`, `error`
   (overwritten each run; the JSON log is timestamped, so it accumulates).
 
+## Bullseye export
+
+`--bullseye-json output/bullseye_payload.jsonl` additionally writes one
+Bullseye-compatible enrichment payload per row as JSON Lines:
+
+```json
+{
+  "lead_external_id": null,
+  "practice_name": "...", "phone": "...", "city": "...", "state": "...",
+  "website": "https://...",
+  "website_confidence": "high",
+  "website_evidence": {
+    "source": "google_places",
+    "google_place_id": "...", "google_maps_uri": "...",
+    "matched_phone": true, "matched_city": true, "matched_state": true,
+    "score": 92,
+    "reason": "Exact phone match; city/state matched; website returned by Google Places."
+  },
+  "needs_manual_review": false
+}
+```
+
+`website` is the vetted official site (blank for directory/social matches),
+`source` is `google_places` or `google_places_verified`, and the `matched_*`
+flags come from the Google place (and homepage verification, if run). This is
+export-only — it does not connect to any Bullseye database or API.
+
 ## Project structure
 
 ```
@@ -207,6 +235,7 @@ BEMI-website-enrichment/
     ├── website_verify.py     # optional homepage verification
     ├── excel_format.py       # XLSX styling for human review
     ├── audit.py              # run log + per-row events
+    ├── bullseye_export.py    # Bullseye JSONL payload format
     ├── scoring.py            # match confidence scoring
     └── enrich.py             # orchestration (row -> enriched row)
 ```
@@ -223,10 +252,10 @@ The tests cover normalization (`tests/test_normalize.py`), scoring
 (`tests/test_scoring.py`), the Places client with mocked HTTP
 (`tests/test_google_places.py`), the SQLite cache (`tests/test_cache.py`), website verification
 (`tests/test_website_verify.py`), XLSX review formatting
-(`tests/test_excel_format.py`), audit logging (`tests/test_audit.py`), and the
-enrichment/CLI orchestration with a fake client (`tests/test_enrich.py`).
-`pyproject.toml` sets `pythonpath` so `import src` works without installing the
-package.
+(`tests/test_excel_format.py`), audit logging (`tests/test_audit.py`), the
+Bullseye export (`tests/test_bullseye_export.py`), and the enrichment/CLI
+orchestration with a fake client (`tests/test_enrich.py`). `pyproject.toml`
+sets `pythonpath` so `import src` works without installing the package.
 
 ## Roadmap
 
@@ -236,9 +265,9 @@ checkpointing with atomic writes), normalization, the Google Places API (New)
 client (`text_search` / `place_details`) with retry/backoff on 429, 5xx, and
 transient network errors, rule-based scoring with a `high`/`medium`/`low`/
 `none` confidence, optional homepage verification, review-formatted XLSX
-output, per-run audit logs, and the end-to-end pipeline that scores every
-candidate, picks the best, completes it via Place Details, and re-scores.
-Still to do:
+output, per-run audit logs, a Bullseye JSONL export, and the end-to-end
+pipeline that scores every candidate, picks the best, completes it via Place
+Details, and re-scores. Still to do:
 
 - [ ] Tune the scoring weights/thresholds against labeled data.
 - [ ] Per-request rate limiting / throttling for API calls.

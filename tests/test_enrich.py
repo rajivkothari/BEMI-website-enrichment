@@ -311,6 +311,26 @@ class TestCli:
         cli.main([str(src), "--output", str(out), "--no-cache", "--resume"])
         assert len(fake.search_calls) == 1  # the one row was already done
 
+    def test_bullseye_json_export(self, monkeypatch, tmp_path):
+        import json
+
+        fake = FakeClient(results=[make_candidate()])
+        monkeypatch.setattr(google_places, "GooglePlacesClient",
+                            lambda api_key=None, **kw: fake)
+        src = tmp_path / "in.csv"
+        pd.DataFrame([ROW]).to_csv(src, index=False)
+        bull = tmp_path / "bullseye.jsonl"
+
+        rc = cli.main([str(src), "--output", str(tmp_path / "out.csv"), "--no-cache",
+                       "--bullseye-json", str(bull)])
+        assert rc == 0
+        assert bull.exists()
+        lines = bull.read_text().splitlines()
+        assert len(lines) == 1
+        payload = json.loads(lines[0])
+        assert payload["practice_name"] == "Acme Dental"
+        assert "website_evidence" in payload
+
     def test_missing_api_key_exits_nonzero(self, monkeypatch, tmp_path):
         def boom(api_key=None, **kw):
             raise google_places.PlacesError("Missing Google Maps API key.")
