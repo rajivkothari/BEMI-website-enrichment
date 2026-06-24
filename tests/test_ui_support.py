@@ -114,15 +114,20 @@ class TestCostEstimate:
 
 
 class TestRowStatus:
-    def test_found_high(self):
+    def test_existing_from_source_file(self):
         assert ui_support.row_status(
-            {"official_website_candidate": "https://a.com", "match_confidence": "high"}
+            {"official_website_candidate": "https://a.com", "website_source": "outscraper"}
+        ) == ui_support.STATUS_EXISTING
+
+    def test_found_via_places(self):
+        assert ui_support.row_status(
+            {"official_website_candidate": "https://a.com", "website_source": "google_places"}
         ) == ui_support.STATUS_FOUND
 
-    def test_check_medium(self):
+    def test_found_via_web(self):
         assert ui_support.row_status(
-            {"official_website_candidate": "https://a.com", "match_confidence": "medium"}
-        ) == ui_support.STATUS_CHECK
+            {"official_website_candidate": "https://a.com", "website_source": "web_search"}
+        ) == ui_support.STATUS_FOUND_WEB
 
     def test_candidate_when_directory_or_group(self):
         assert ui_support.row_status(
@@ -151,10 +156,12 @@ class TestReviewTableAndTiles:
     def test_tile_counts(self):
         counts = ui_support.tile_counts(self._enriched())
         assert counts["total"] == 2
+        assert counts["existing"] == 1      # r1 came from the source file
+        assert counts["found"] == 0         # nothing discovered via Places/web
+        assert counts["candidate"] == 1     # r2 is a directory-only site
         assert counts["website_found"] == 1
         assert counts["no_website"] == 1
         assert counts["needs_review"] == 1
-        assert counts["high"] == 1 and counts["low"] == 1
 
     def test_review_table_shape(self):
         view = ui_support.build_review_table(self._enriched())

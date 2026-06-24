@@ -41,14 +41,15 @@ OUTPUT_SCHEMA = INPUT_COLUMNS + ENRICHMENT_COLUMNS
 _CONFIDENCE_DOTS = {"high": "🟢", "medium": "🟡", "low": "🟠", "none": "⚪", "": "⚪"}
 
 # Per-row status markers (the at-a-glance "did we find it?" signal).
-STATUS_FOUND = "✅ Found"           # official site, high confidence
-STATUS_CHECK = "🟡 Check"           # official site, but verify (medium/low)
-STATUS_CANDIDATE = "⚠️ Candidate"   # only a group/directory site — not accepted
-STATUS_NONE = "🚫 None"             # no website found at all
-STATUS_ERROR = "❗ Error"           # the row failed (API/parse error)
+STATUS_EXISTING = "📄 Existing"      # website was already in the input file
+STATUS_FOUND = "✅ Found"            # official site discovered via Google Places
+STATUS_FOUND_WEB = "🔎 Found (web)"  # official site discovered via web search
+STATUS_CANDIDATE = "⚠️ Candidate"    # only a group/directory site — not accepted
+STATUS_NONE = "🚫 None"              # no website found at all
+STATUS_ERROR = "❗ Error"            # the row failed (API/parse error)
 
-STATUS_LEGEND = ("✅ official site found · 🟡 found — verify · "
-                 "⚠️ only a group/directory candidate · 🚫 no website · ❗ error")
+STATUS_LEGEND = ("📄 existing (already in your file) · ✅ found (Places) · 🔎 found (web) · "
+                 "⚠️ group/directory only · 🚫 no website · ❗ error")
 
 # Approximate Google Places (New) cost per looked-up row: one Text Search
 # (~$0.032) + one Place Details (~$0.017), Pro SKUs, before Google's monthly
@@ -163,23 +164,24 @@ def confidence_dot(label: Any) -> str:
 
 
 def tile_counts(df: pd.DataFrame) -> Dict[str, int]:
-    """Summary counts for the stat tiles."""
-    def conf(level: str) -> int:
-        return int((df.get("match_confidence", pd.Series(dtype=str)).astype(str).str.lower() == level).sum())
-
-    website_found = int((df.get("official_website_candidate", pd.Series(dtype=str))
-                         .fillna("").astype(str).str.strip() != "").sum())
+    """Summary counts for the stat tiles, by row status."""
+    statuses = [row_status(rec) for rec in df.fillna("").to_dict("records")]
+    total = len(df)
+    existing = statuses.count(STATUS_EXISTING)
+    found = statuses.count(STATUS_FOUND) + statuses.count(STATUS_FOUND_WEB)
+    website_found = existing + found
     needs_review = int(sum(str(v).strip().lower() == "true" or v is True
                            for v in df.get("needs_review", pd.Series(dtype=str))))
-    total = len(df)
     return {
         "total": total,
+        "existing": existing,
+        "found": found,
+        "candidate": statuses.count(STATUS_CANDIDATE),
+        "none": statuses.count(STATUS_NONE),
+        "error": statuses.count(STATUS_ERROR),
         "website_found": website_found,
         "no_website": total - website_found,
         "needs_review": needs_review,
-        "high": conf("high"),
-        "medium": conf("medium"),
-        "low": conf("low"),
     }
 
 
@@ -187,9 +189,13 @@ def row_status(row: Mapping[str, Any]) -> str:
     """One at-a-glance status marker for a row (see the STATUS_* constants)."""
     if str(row.get("error") or "").strip():
         return STATUS_ERROR
+    source = str(row.get("website_source") or "").strip().lower()
     if str(row.get("official_website_candidate") or "").strip():
-        return STATUS_FOUND if str(row.get("match_confidence")).strip().lower() == "high" \
-            else STATUS_CHECK
+        if source == "outscraper":
+            return STATUS_EXISTING        # was already in the input
+        if source == "web_search":
+            return STATUS_FOUND_WEB        # discovered via web search
+        return STATUS_FOUND                # discovered via Places
     if str(row.get("google_website") or "").strip() or "web candidate" in str(row.get("reviewer_notes") or ""):
         return STATUS_CANDIDATE
     return STATUS_NONE

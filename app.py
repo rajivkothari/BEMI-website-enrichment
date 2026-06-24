@@ -29,6 +29,7 @@ TERRACOTTA = "#c84b2f"
 GREEN = "#1f7a4d"
 AMBER = "#c87f24"
 SLATE = "#3a4250"
+STEEL = "#4a6b8a"   # "already in your file" — calmer than the green used for fresh finds
 
 # Bullseye crosshair mark, recolored white-on-dark for the header bar.
 LOGO_SVG = """
@@ -88,7 +89,8 @@ def render_tiles(counts: dict) -> None:
     st.markdown(
         '<div class="be-tiles">'
         + tile(counts["total"], "Total", INK)
-        + tile(counts["website_found"], "Website found", GREEN)
+        + tile(counts["existing"], "Already in file", STEEL)
+        + tile(counts["found"], "Newly found", GREEN)
         + tile(counts["needs_review"], "Needs review", AMBER)
         + tile(counts["no_website"], "No website", SLATE)
         + "</div>",
@@ -251,8 +253,9 @@ if st.button("🎯  Enrich All", type="primary"):
         st.session_state.enriched = enriched
         c = ui_support.tile_counts(enriched)
         st.success(
-            f"Done — {c['total']} rows · {c['website_found']} with a website · "
-            f"{c['needs_review']} need review · {c['no_website']} with no website · "
+            f"Done — {c['total']} rows · {c['existing']} already in your file · "
+            f"{c['found']} newly found · {c['no_website']} with no website · "
+            f"{c['needs_review']} need review · "
             f"{looked_up} Google lookups (~${ui_support.estimate_cost(looked_up, price_per_lookup):,.2f}).")
     except PlacesError as exc:
         st.error(f"Could not run: {exc}")
@@ -269,8 +272,9 @@ if "enriched" in st.session_state:
 
     work = enriched.reset_index(drop=True)
     statuses = pd.Series([ui_support.row_status(r) for r in work.to_dict("records")], index=work.index)
-    choices = ["All", "Needs review", ui_support.STATUS_FOUND, ui_support.STATUS_CHECK,
-               ui_support.STATUS_CANDIDATE, ui_support.STATUS_NONE, ui_support.STATUS_ERROR]
+    choices = ["All", "Needs review", ui_support.STATUS_EXISTING, ui_support.STATUS_FOUND,
+               ui_support.STATUS_FOUND_WEB, ui_support.STATUS_CANDIDATE,
+               ui_support.STATUS_NONE, ui_support.STATUS_ERROR]
     show = st.selectbox("Show", choices, index=0)
     if show == "All":
         mask = pd.Series(True, index=work.index)
