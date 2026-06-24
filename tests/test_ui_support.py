@@ -113,6 +113,30 @@ class TestCostEstimate:
         assert ui_support.estimate_cost(3, 0.049) == 0.15
 
 
+class TestRowStatus:
+    def test_found_high(self):
+        assert ui_support.row_status(
+            {"official_website_candidate": "https://a.com", "match_confidence": "high"}
+        ) == ui_support.STATUS_FOUND
+
+    def test_check_medium(self):
+        assert ui_support.row_status(
+            {"official_website_candidate": "https://a.com", "match_confidence": "medium"}
+        ) == ui_support.STATUS_CHECK
+
+    def test_candidate_when_directory_or_group(self):
+        assert ui_support.row_status(
+            {"official_website_candidate": "", "google_website": "https://facebook.com/x"}
+        ) == ui_support.STATUS_CANDIDATE
+        assert ui_support.row_status(
+            {"official_website_candidate": "", "reviewer_notes": "web candidate: https://group.com"}
+        ) == ui_support.STATUS_CANDIDATE
+
+    def test_none_and_error(self):
+        assert ui_support.row_status({"official_website_candidate": "", "google_website": ""}) == ui_support.STATUS_NONE
+        assert ui_support.row_status({"error": "places_error: boom"}) == ui_support.STATUS_ERROR
+
+
 class TestReviewTableAndTiles:
     def _enriched(self):
         base = {c: "" for c in INPUT_COLUMNS + ENRICHMENT_COLUMNS}
@@ -134,9 +158,9 @@ class TestReviewTableAndTiles:
 
     def test_review_table_shape(self):
         view = ui_support.build_review_table(self._enriched())
-        assert list(view.columns) == ["needs_review", "practice", "location", "phone", "website",
-                                      "confidence", "score", "source", "reason", "decision",
-                                      "final_website", "notes"]
+        assert list(view.columns) == ["status", "needs_review", "practice", "location", "phone",
+                                      "website", "confidence", "score", "source", "reason",
+                                      "decision", "final_website", "notes"]
         assert view.iloc[0]["website"] == "https://acme.example"
         assert view.iloc[0]["location"] == "Suwanee, GA"
         assert view.iloc[0]["phone"] == "+14042521137"

@@ -265,16 +265,27 @@ if "enriched" in st.session_state:
     render_tiles(ui_support.tile_counts(enriched))
 
     st.markdown('<span class="be-label">Step 4 — Review & clean up</span>', unsafe_allow_html=True)
-    only_review = st.toggle("Show only rows needing review", value=False)
+    st.caption(ui_support.STATUS_LEGEND)
 
     work = enriched.reset_index(drop=True)
-    review_mask = work["needs_review"].map(lambda v: v is True or str(v).strip().lower() == "true")
-    disp = work[review_mask] if only_review else work
+    statuses = pd.Series([ui_support.row_status(r) for r in work.to_dict("records")], index=work.index)
+    choices = ["All", "Needs review", ui_support.STATUS_FOUND, ui_support.STATUS_CHECK,
+               ui_support.STATUS_CANDIDATE, ui_support.STATUS_NONE, ui_support.STATUS_ERROR]
+    show = st.selectbox("Show", choices, index=0)
+    if show == "All":
+        mask = pd.Series(True, index=work.index)
+    elif show == "Needs review":
+        mask = work["needs_review"].map(lambda v: v is True or str(v).strip().lower() == "true")
+    else:
+        mask = statuses == show
+    disp = work[mask]
+    st.caption(f"Showing {len(disp)} of {len(work)} rows.")
 
     view = ui_support.build_review_table(disp)
     edited = st.data_editor(
         view, hide_index=True, width="stretch", num_rows="fixed",
         column_config={
+            "status": st.column_config.TextColumn("Status", disabled=True, width="small"),
             "needs_review": st.column_config.CheckboxColumn("Review?", disabled=True, width="small"),
             "practice": st.column_config.TextColumn("Practice", disabled=True, width="large"),
             "location": st.column_config.TextColumn("Location", disabled=True),

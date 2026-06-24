@@ -40,6 +40,16 @@ OUTPUT_SCHEMA = INPUT_COLUMNS + ENRICHMENT_COLUMNS
 
 _CONFIDENCE_DOTS = {"high": "🟢", "medium": "🟡", "low": "🟠", "none": "⚪", "": "⚪"}
 
+# Per-row status markers (the at-a-glance "did we find it?" signal).
+STATUS_FOUND = "✅ Found"           # official site, high confidence
+STATUS_CHECK = "🟡 Check"           # official site, but verify (medium/low)
+STATUS_CANDIDATE = "⚠️ Candidate"   # only a group/directory site — not accepted
+STATUS_NONE = "🚫 None"             # no website found at all
+STATUS_ERROR = "❗ Error"           # the row failed (API/parse error)
+
+STATUS_LEGEND = ("✅ official site found · 🟡 found — verify · "
+                 "⚠️ only a group/directory candidate · 🚫 no website · ❗ error")
+
 # Approximate Google Places (New) cost per looked-up row: one Text Search
 # (~$0.032) + one Place Details (~$0.017), Pro SKUs, before Google's monthly
 # free credit. Tune to your actual billing.
@@ -173,6 +183,18 @@ def tile_counts(df: pd.DataFrame) -> Dict[str, int]:
     }
 
 
+def row_status(row: Mapping[str, Any]) -> str:
+    """One at-a-glance status marker for a row (see the STATUS_* constants)."""
+    if str(row.get("error") or "").strip():
+        return STATUS_ERROR
+    if str(row.get("official_website_candidate") or "").strip():
+        return STATUS_FOUND if str(row.get("match_confidence")).strip().lower() == "high" \
+            else STATUS_CHECK
+    if str(row.get("google_website") or "").strip() or "web candidate" in str(row.get("reviewer_notes") or ""):
+        return STATUS_CANDIDATE
+    return STATUS_NONE
+
+
 def build_review_table(df: pd.DataFrame) -> pd.DataFrame:
     """Project the enriched frame into the editable review view."""
     df = df.reset_index(drop=True).fillna("")
@@ -186,6 +208,7 @@ def build_review_table(df: pd.DataFrame) -> pd.DataFrame:
         col("official_website_candidate").astype(str) != "", col("google_website"))
 
     return pd.DataFrame({
+        "status": [row_status(rec) for rec in df.to_dict("records")],
         "needs_review": [str(v).strip().lower() == "true" or v is True for v in col("needs_review")],
         "practice": col("practice_name"),
         "location": location,
